@@ -3,7 +3,7 @@
  * 重力、空気抵抗、回転などを考慮
  */
 
-import { BallType, getRandomBallType } from './game-config';
+import { BallType, DIFFICULTY_CONFIG, getRandomBallType } from './game-config';
 
 export interface BallPhysicsConfig {
   gravity: number; // 重力加速度（ピクセル/フレーム²）
@@ -41,14 +41,7 @@ export function generateRandomTrajectory(
   let angle: number;
   let speed: number;
 
-  // 難易度に応じた速度範囲
-  const speedConfig = {
-    EASY: { min: 2, max: 4 },
-    NORMAL: { min: 4, max: 8 },
-    HARD: { min: 6, max: 10 },
-  };
-
-  const speedRange = speedConfig[difficulty];
+  const speedRange = DIFFICULTY_CONFIG[difficulty].initialSpeed;
 
   if (fromLeft) {
     // 左から出現

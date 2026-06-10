@@ -12,6 +12,7 @@ import {
   type BallPhysicsConfig,
 } from '@/lib/ball-physics';
 import { PoseData } from '@/lib/types/pose';
+import { useGameContext } from '@/lib/game-context';
 import { useSoundManager } from '@/hooks/use-sound-manager';
 import { useParticles } from '@/hooks/use-particles';
 import * as Haptics from 'expo-haptics';
@@ -19,7 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 const { width, height } = Dimensions.get('window');
 
-import { BallType, BALL_TYPE_CONFIG } from '@/lib/game-config';
+import { BallType, BALL_TYPE_CONFIG, DIFFICULTY_CONFIG } from '@/lib/game-config';
 
 interface Ball {
   id: string;
@@ -32,26 +33,28 @@ interface Ball {
   type: BallType;
 }
 
-// 物理エンジン設定
-const PHYSICS_CONFIG: BallPhysicsConfig = {
-  gravity: 0.25,
-  airResistance: 0.02,
-  screenWidth: width,
-  screenHeight: height,
-};
+const DIFFICULTY_SCORE_MULTIPLIER = {
+  EASY: 1,
+  NORMAL: 1.5,
+  HARD: 2,
+} as const;
 
 export default function GameScreen() {
   const router = useRouter();
+  const { gameState, setGameState } = useGameContext();
   const [score, setScore] = useState(0);
   const [isGameActive, setIsGameActive] = useState(false);
   const [isPositioningComplete, setIsPositioningComplete] = useState(false);
-  const [timeRemaining, setTimeRemaining] = useState(60);
+  const [timeRemaining, setTimeRemaining] = useState(
+    DIFFICULTY_CONFIG[gameState?.difficulty || 'NORMAL'].timeLimit
+  );
   const [poseData, setPoseData] = useState<PoseData | null>(null);
   const [balls, setBalls] = useState<Ball[]>([]);
   const [combo, setCombo] = useState(0);
   const [maxCombo, setMaxCombo] = useState(0);
+  const [successCount, setSuccessCount] = useState(0);
+  const [totalBalls, setTotalBalls] = useState(0);
   const [lastComboTime, setLastComboTime] = useState(0);
-  const { gameState } = require('@/lib/game-context').useGameContext();
   const { playKickSuccess, playCombo } = useSoundManager();
   const { particles, createBallBurstEffect, createKickSuccessEffect, createComboEffect } = useParticles();
 
@@ -62,10 +65,8 @@ export default function GameScreen() {
   const difficulty = gameState?.difficulty || 'NORMAL';
 
   const generateBall = () => {
-    if (!poseData) return;
-    
     const now = Date.now();
-    if (now - lastBallTimeRef.current < 1500) return;
+    if (now - lastBallTimeRef.current < DIFFICULTY_CONFIG[difficulty].ballSpawnInterval) return;
 
     lastBallTimeRef.current = now;
 
@@ -83,13 +84,21 @@ export default function GameScreen() {
     };
 
     setBalls((prev) => [...prev, newBall]);
+    setTotalBalls((prev) => prev + 1);
   };
 
   const updateBalls = (pose: PoseData | null) => {
     setBalls((prevBalls) => {
       let updated = prevBalls
         .map((ball) => {
-          const physics = updateBallPhysics(ball.x, ball.y, ball.vx, ball.vy, PHYSICS_CONFIG);
+          const difficultyConfig = DIFFICULTY_CONFIG[difficulty];
+          const physicsConfig: BallPhysicsConfig = {
+            gravity: difficultyConfig.gravity,
+            airResistance: difficultyConfig.airResistance,
+            screenWidth: width,
+            screenHeight: height,
+          };
+          const physics = updateBallPhysics(ball.x, ball.y, ball.vx, ball.vy, physicsConfig);
 
           return {
             ...ball,
@@ -117,11 +126,12 @@ export default function GameScreen() {
             : Infinity;
 
           if (rightDist < 50 || leftDist < 50) {
-            const points = BALL_TYPE_CONFIG[ball.type].points;
-            const comboBonus = Math.floor(combo * 0.1);
-            const totalPoints = points + comboBonus;
+            const basePoints = BALL_TYPE_CONFIG[ball.type].points;
+            const comboBonus = combo * 5;
+            const totalPoints = Math.round(basePoints * DIFFICULTY_SCORE_MULTIPLIER[difficulty] + comboBonus);
 
             setScore((prev) => prev + totalPoints);
+            setSuccessCount((prev) => prev + 1);
             setCombo((prev) => prev + 1);
             setMaxCombo((prev) => Math.max(prev, combo + 1));
             setLastComboTime(Date.now());
@@ -161,6 +171,7 @@ export default function GameScreen() {
     gameLoopRef.current = setInterval(() => {
       const updated = generateDummyPoseData();
       setPoseData(updated);
+      generateBall();
       updateBalls(updated);
     }, 50);
 
@@ -184,6 +195,17 @@ export default function GameScreen() {
 
   const handlePause = () => {
     setIsGameActive(!isGameActive);
+  };
+
+  const handleShowResult = () => {
+    setGameState({
+      difficulty,
+      score,
+      successCount,
+      totalBalls,
+      maxCombo,
+    });
+    router.push('/game-result');
   };
 
   if (!isGameActive && timeRemaining <= 0) {
@@ -210,14 +232,12 @@ export default function GameScreen() {
             </View>
             <View style={styles.statItem}>
               <Text style={styles.statLabel}>成功数</Text>
-              <Text style={styles.statValue}>{balls.filter(b => !b.active).length}</Text>
+              <Text style={styles.statValue}>{successCount}</Text>
             </View>
           </View>
           <TouchableOpacity
             style={styles.replayButton}
-            onPress={() => {
-              router.push('/game-result');
-            }}
+            onPress={handleShowResult}
             activeOpacity={0.8}
           >
             <Text style={styles.buttonText}>結果を見る</Text>

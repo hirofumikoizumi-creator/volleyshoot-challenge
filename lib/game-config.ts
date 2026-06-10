@@ -31,8 +31,8 @@ export const DIFFICULTY_CONFIG: Record<GameDifficulty, DifficultyConfig> = {
   EASY: {
     gravity: 0.15,
     airResistance: 0.03,
-    ballSpawnInterval: 2500, // 2.5秒ごと
-    initialSpeed: { min: 2, max: 4 },
+    ballSpawnInterval: 3000, // 3秒ごと
+    initialSpeed: { min: 4, max: 6 },
     timeLimit: 60,
     ballTypeDistribution: {
       normal: 90,
@@ -45,8 +45,8 @@ export const DIFFICULTY_CONFIG: Record<GameDifficulty, DifficultyConfig> = {
   NORMAL: {
     gravity: 0.25,
     airResistance: 0.02,
-    ballSpawnInterval: 1500, // 1.5秒ごと
-    initialSpeed: { min: 4, max: 8 },
+    ballSpawnInterval: 2000, // 2秒ごと
+    initialSpeed: { min: 5, max: 7 },
     timeLimit: 60,
     ballTypeDistribution: {
       normal: 80,
@@ -59,8 +59,8 @@ export const DIFFICULTY_CONFIG: Record<GameDifficulty, DifficultyConfig> = {
   HARD: {
     gravity: 0.35,
     airResistance: 0.01,
-    ballSpawnInterval: 1000, // 1秒ごと
-    initialSpeed: { min: 6, max: 10 },
+    ballSpawnInterval: 1500, // 1.5秒ごと
+    initialSpeed: { min: 6, max: 8 },
     timeLimit: 60,
     ballTypeDistribution: {
       normal: 70,
