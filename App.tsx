@@ -14,6 +14,8 @@ type Difficulty = "EASY" | "NORMAL" | "HARD";
 type Screen = "home" | "rules" | "play" | "result" | "camera";
 type BallType = "NORMAL" | "BLUE" | "GOLD";
 type ShotResult = "PERFECT" | "GOOD" | "MISS" | "AVOID";
+type CameraFacing = "front" | "back";
+type RecognitionRange = "FULL_BODY" | "LOWER_BODY" | "FEET";
 
 type Ball = {
   id: number;
@@ -92,6 +94,24 @@ const initialStats: GameStats = {
   lastResult: null,
 };
 
+const recognitionLabels: Record<RecognitionRange, { label: string; status: string; hint: string }> = {
+  FULL_BODY: {
+    label: "全身",
+    status: "全身認識モード",
+    hint: "フォーム分析まで使えます。距離が必要な場合は下半身へ切替できます。",
+  },
+  LOWER_BODY: {
+    label: "下半身",
+    status: "下半身認識モード",
+    hint: "通常プレー推奨。腰、膝、足首が入ればキック判定に進めます。",
+  },
+  FEET: {
+    label: "足元",
+    status: "足元簡易モード",
+    hint: "近い位置で遊ぶための簡易判定です。足首周辺が見えればOKです。",
+  },
+};
+
 function randomBetween(min: number, max: number) {
   return min + Math.random() * (max - min);
 }
@@ -140,6 +160,8 @@ export default function App() {
   const [isPaused, setIsPaused] = useState(false);
   const [message, setMessage] = useState("タイミングを合わせてシュート");
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [cameraFacing, setCameraFacing] = useState<CameraFacing>("front");
+  const [recognitionRange, setRecognitionRange] = useState<RecognitionRange>("LOWER_BODY");
 
   const ballIdRef = useRef(1);
   const lastTickRef = useRef(Date.now());
@@ -406,7 +428,7 @@ export default function App() {
                 <Text style={styles.cameraTitle}>カメラ診断</Text>
                 <Text style={styles.cameraStatus}>
                   {cameraPermission?.granted
-                    ? "プレビュー表示中"
+                    ? recognitionLabels[recognitionRange].status
                     : cameraPermission?.canAskAgain === false
                       ? "設定アプリでカメラ許可が必要です"
                       : "カメラ許可を確認します"}
@@ -419,13 +441,32 @@ export default function App() {
 
             <View style={styles.cameraPreviewFrame}>
               {cameraPermission?.granted ? (
-                <CameraView style={styles.cameraPreview} facing="front">
+                <CameraView style={styles.cameraPreview} facing={cameraFacing}>
                   <View style={styles.cameraOverlay}>
-                    <View style={styles.poseGuideHead} />
-                    <View style={styles.poseGuideBody} />
-                    <View style={styles.poseGuideLegLeft} />
-                    <View style={styles.poseGuideLegRight} />
-                    <Text style={styles.cameraOverlayText}>全身が入る位置に立ってください</Text>
+                    {recognitionRange === "FULL_BODY" && (
+                      <>
+                        <View style={styles.poseGuideHead} />
+                        <View style={styles.poseGuideBody} />
+                        <View style={styles.poseGuideLegLeft} />
+                        <View style={styles.poseGuideLegRight} />
+                      </>
+                    )}
+                    {recognitionRange === "LOWER_BODY" && (
+                      <>
+                        <View style={styles.lowerBodyWaistLine} />
+                        <View style={styles.lowerBodyGuide} />
+                        <View style={styles.lowerLegLeft} />
+                        <View style={styles.lowerLegRight} />
+                      </>
+                    )}
+                    {recognitionRange === "FEET" && (
+                      <>
+                        <View style={styles.feetGuideLeft} />
+                        <View style={styles.feetGuideRight} />
+                        <View style={styles.feetStrikeLine} />
+                      </>
+                    )}
+                    <Text style={styles.cameraOverlayText}>{recognitionLabels[recognitionRange].hint}</Text>
                   </View>
                 </CameraView>
               ) : (
@@ -442,8 +483,59 @@ export default function App() {
             </View>
 
             <View style={styles.cameraFooter}>
+              <View style={styles.cameraControlRow}>
+                <Pressable
+                  style={[styles.cameraToggleButton, cameraFacing === "front" && styles.cameraToggleActive]}
+                  onPress={() => setCameraFacing("front")}
+                >
+                  <Text
+                    style={[
+                      styles.cameraToggleText,
+                      cameraFacing === "front" && styles.cameraToggleTextActive,
+                    ]}
+                  >
+                    前面
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.cameraToggleButton, cameraFacing === "back" && styles.cameraToggleActive]}
+                  onPress={() => setCameraFacing("back")}
+                >
+                  <Text
+                    style={[
+                      styles.cameraToggleText,
+                      cameraFacing === "back" && styles.cameraToggleTextActive,
+                    ]}
+                  >
+                    背面
+                  </Text>
+                </Pressable>
+              </View>
+
+              <View style={styles.recognitionTabs}>
+                {(["FULL_BODY", "LOWER_BODY", "FEET"] as RecognitionRange[]).map((item) => (
+                  <Pressable
+                    key={item}
+                    style={[
+                      styles.recognitionTab,
+                      recognitionRange === item && styles.recognitionTabActive,
+                    ]}
+                    onPress={() => setRecognitionRange(item)}
+                  >
+                    <Text
+                      style={[
+                        styles.recognitionTabText,
+                        recognitionRange === item && styles.recognitionTabTextActive,
+                      ]}
+                    >
+                      {recognitionLabels[item].label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
               <Text style={styles.cameraHint}>
-                この画面でクラッシュしなければ、次に足首位置のガイド判定を追加します。
+                通常プレーは下半身で十分です。全身はフォーム分析、足元は近距離プレー用です。
               </Text>
             </View>
           </View>
@@ -807,6 +899,71 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,217,255,0.72)",
     transform: [{ translateX: 28 }, { rotate: "-12deg" }],
   },
+  lowerBodyWaistLine: {
+    position: "absolute",
+    top: "22%",
+    left: "22%",
+    right: "22%",
+    height: 2,
+    backgroundColor: "rgba(71,209,108,0.9)",
+  },
+  lowerBodyGuide: {
+    position: "absolute",
+    top: "22%",
+    bottom: "13%",
+    width: "42%",
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "rgba(71,209,108,0.82)",
+    backgroundColor: "rgba(71,209,108,0.08)",
+  },
+  lowerLegLeft: {
+    position: "absolute",
+    bottom: "14%",
+    width: 3,
+    height: "37%",
+    backgroundColor: "rgba(71,209,108,0.82)",
+    transform: [{ translateX: -34 }, { rotate: "9deg" }],
+  },
+  lowerLegRight: {
+    position: "absolute",
+    bottom: "14%",
+    width: 3,
+    height: "37%",
+    backgroundColor: "rgba(71,209,108,0.82)",
+    transform: [{ translateX: 34 }, { rotate: "-9deg" }],
+  },
+  feetGuideLeft: {
+    position: "absolute",
+    bottom: "26%",
+    width: 92,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 2,
+    borderColor: "rgba(250,204,21,0.9)",
+    backgroundColor: "rgba(250,204,21,0.1)",
+    transform: [{ translateX: -58 }, { rotate: "8deg" }],
+  },
+  feetGuideRight: {
+    position: "absolute",
+    bottom: "26%",
+    width: 92,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 2,
+    borderColor: "rgba(250,204,21,0.9)",
+    backgroundColor: "rgba(250,204,21,0.1)",
+    transform: [{ translateX: 58 }, { rotate: "-8deg" }],
+  },
+  feetStrikeLine: {
+    position: "absolute",
+    bottom: "19%",
+    left: "18%",
+    right: "18%",
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "rgba(250,204,21,0.9)",
+  },
   cameraOverlayText: {
     position: "absolute",
     bottom: 20,
@@ -840,6 +997,59 @@ const styles = StyleSheet.create({
   cameraFooter: {
     paddingHorizontal: 14,
     paddingBottom: 12,
+    gap: 10,
+  },
+  cameraControlRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  cameraToggleButton: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  cameraToggleActive: {
+    backgroundColor: "rgba(0,217,255,0.18)",
+    borderColor: "rgba(0,217,255,0.55)",
+  },
+  cameraToggleText: {
+    color: "#DCE7F3",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  cameraToggleTextActive: {
+    color: "#00D9FF",
+  },
+  recognitionTabs: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  recognitionTab: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  recognitionTabActive: {
+    backgroundColor: "rgba(71,209,108,0.18)",
+    borderColor: "rgba(71,209,108,0.55)",
+  },
+  recognitionTabText: {
+    color: "#DCE7F3",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  recognitionTabTextActive: {
+    color: "#47D16C",
   },
   cameraHint: {
     color: "#94A3B8",
