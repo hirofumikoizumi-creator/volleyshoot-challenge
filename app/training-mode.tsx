@@ -7,7 +7,6 @@ import { useRouter } from 'expo-router';
 import { useGameContext } from '@/lib/game-context';
 import { DIFFICULTY_CONFIG, getRandomBallType, BALL_TYPE_CONFIG } from '@/lib/game-config';
 import { generateRandomTrajectory } from '@/lib/ball-physics';
-import * as Audio from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 
 const { width, height } = Dimensions.get('window');

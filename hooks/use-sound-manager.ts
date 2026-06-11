@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import * as Audio from 'expo-audio';
 
 export interface SoundManager {
   playKickSuccess: () => Promise<void>;
