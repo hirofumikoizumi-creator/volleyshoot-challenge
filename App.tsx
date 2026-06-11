@@ -8,9 +8,10 @@ import {
   Text,
   View,
 } from "react-native";
+import { CameraView, useCameraPermissions } from "expo-camera";
 
 type Difficulty = "EASY" | "NORMAL" | "HARD";
-type Screen = "home" | "rules" | "play" | "result";
+type Screen = "home" | "rules" | "play" | "result" | "camera";
 type BallType = "NORMAL" | "BLUE" | "GOLD";
 type ShotResult = "PERFECT" | "GOOD" | "MISS" | "AVOID";
 
@@ -138,6 +139,7 @@ export default function App() {
   const [fieldSize, setFieldSize] = useState({ width: 0, height: 0 });
   const [isPaused, setIsPaused] = useState(false);
   const [message, setMessage] = useState("タイミングを合わせてシュート");
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
   const ballIdRef = useRef(1);
   const lastTickRef = useRef(Date.now());
@@ -377,6 +379,10 @@ export default function App() {
             <Pressable style={styles.secondaryButton} onPress={() => setScreen("rules")}>
               <Text style={styles.secondaryText}>ルールを見る</Text>
             </Pressable>
+
+            <Pressable style={styles.cameraButton} onPress={() => setScreen("camera")}>
+              <Text style={styles.cameraButtonText}>カメラ診断</Text>
+            </Pressable>
           </ScrollView>
         )}
 
@@ -391,6 +397,56 @@ export default function App() {
               <Text style={styles.secondaryText}>戻る</Text>
             </Pressable>
           </ScrollView>
+        )}
+
+        {screen === "camera" && (
+          <View style={styles.cameraRoot}>
+            <View style={styles.cameraHeader}>
+              <View>
+                <Text style={styles.cameraTitle}>カメラ診断</Text>
+                <Text style={styles.cameraStatus}>
+                  {cameraPermission?.granted
+                    ? "プレビュー表示中"
+                    : cameraPermission?.canAskAgain === false
+                      ? "設定アプリでカメラ許可が必要です"
+                      : "カメラ許可を確認します"}
+                </Text>
+              </View>
+              <Pressable style={styles.headerButton} onPress={() => setScreen("home")}>
+                <Text style={styles.headerButtonText}>戻る</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.cameraPreviewFrame}>
+              {cameraPermission?.granted ? (
+                <CameraView style={styles.cameraPreview} facing="front">
+                  <View style={styles.cameraOverlay}>
+                    <View style={styles.poseGuideHead} />
+                    <View style={styles.poseGuideBody} />
+                    <View style={styles.poseGuideLegLeft} />
+                    <View style={styles.poseGuideLegRight} />
+                    <Text style={styles.cameraOverlayText}>全身が入る位置に立ってください</Text>
+                  </View>
+                </CameraView>
+              ) : (
+                <View style={styles.permissionPanel}>
+                  <Text style={styles.permissionTitle}>カメラを使う準備</Text>
+                  <Text style={styles.permissionText}>
+                    次の段階で足の動きからキック判定を行うため、まずプレビュー表示だけを確認します。
+                  </Text>
+                  <Pressable style={styles.primaryButton} onPress={requestCameraPermission}>
+                    <Text style={styles.primaryText}>カメラを許可</Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.cameraFooter}>
+              <Text style={styles.cameraHint}>
+                この画面でクラッシュしなければ、次に足首位置のガイド判定を追加します。
+              </Text>
+            </View>
+          </View>
         )}
 
         {screen === "play" && (
@@ -643,10 +699,152 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
   },
+  cameraButton: {
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    backgroundColor: "rgba(71,209,108,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(71,209,108,0.36)",
+  },
+  cameraButtonText: {
+    color: "#47D16C",
+    fontSize: 16,
+    fontWeight: "800",
+  },
   ruleText: {
     color: "#C9D6E2",
     fontSize: 16,
     lineHeight: 26,
+  },
+  cameraRoot: {
+    flex: 1,
+    backgroundColor: "#08111F",
+  },
+  cameraHeader: {
+    minHeight: 76,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.1)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  cameraTitle: {
+    color: "#FFFFFF",
+    fontSize: 22,
+    fontWeight: "900",
+  },
+  cameraStatus: {
+    color: "#94A3B8",
+    fontSize: 12,
+    marginTop: 4,
+  },
+  headerButton: {
+    minWidth: 72,
+    minHeight: 42,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  headerButtonText: {
+    color: "#DCE7F3",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  cameraPreviewFrame: {
+    flex: 1,
+    margin: 12,
+    borderRadius: 8,
+    overflow: "hidden",
+    backgroundColor: "#050A12",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  cameraPreview: {
+    flex: 1,
+  },
+  cameraOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.08)",
+  },
+  poseGuideHead: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    borderWidth: 2,
+    borderColor: "rgba(0,217,255,0.78)",
+    marginBottom: 8,
+  },
+  poseGuideBody: {
+    width: 120,
+    height: 150,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "rgba(0,217,255,0.72)",
+  },
+  poseGuideLegLeft: {
+    position: "absolute",
+    bottom: 82,
+    width: 2,
+    height: 92,
+    backgroundColor: "rgba(0,217,255,0.72)",
+    transform: [{ translateX: -28 }, { rotate: "12deg" }],
+  },
+  poseGuideLegRight: {
+    position: "absolute",
+    bottom: 82,
+    width: 2,
+    height: 92,
+    backgroundColor: "rgba(0,217,255,0.72)",
+    transform: [{ translateX: 28 }, { rotate: "-12deg" }],
+  },
+  cameraOverlayText: {
+    position: "absolute",
+    bottom: 20,
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "800",
+    backgroundColor: "rgba(8,17,31,0.72)",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  permissionPanel: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  permissionTitle: {
+    color: "#FFFFFF",
+    fontSize: 24,
+    fontWeight: "900",
+    marginBottom: 10,
+  },
+  permissionText: {
+    color: "#C9D6E2",
+    fontSize: 15,
+    lineHeight: 24,
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  cameraFooter: {
+    paddingHorizontal: 14,
+    paddingBottom: 12,
+  },
+  cameraHint: {
+    color: "#94A3B8",
+    fontSize: 12,
+    textAlign: "center",
   },
   playRoot: {
     flex: 1,
