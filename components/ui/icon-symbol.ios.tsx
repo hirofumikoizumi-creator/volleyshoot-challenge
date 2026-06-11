@@ -1,12 +1,10 @@
-import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { ComponentProps } from "react";
-import { OpaqueColorValue, type StyleProp, type TextStyle } from "react-native";
+import { Text, type OpaqueColorValue, type StyleProp, type TextStyle } from "react-native";
 
 const MAPPING = {
-  "house.fill": "home",
-  "paperplane.fill": "send",
-  "chevron.left.forwardslash.chevron.right": "code",
-  "chevron.right": "chevron-right",
+  "house.fill": "Home",
+  "paperplane.fill": ">",
+  "chevron.left.forwardslash.chevron.right": "</>",
+  "chevron.right": ">",
 } as const;
 
 type IconSymbolName = keyof typeof MAPPING;
@@ -23,5 +21,22 @@ export function IconSymbol({
   style?: StyleProp<TextStyle>;
   weight?: unknown;
 }) {
-  return <MaterialIcons color={color} size={size} name={MAPPING[name] as ComponentProps<typeof MaterialIcons>["name"]} style={style} />;
+  return (
+    <Text
+      style={[
+        {
+          color,
+          fontSize: Math.max(12, Math.round(size * 0.55)),
+          fontWeight: "700",
+          lineHeight: size,
+          minWidth: size,
+          height: size,
+          textAlign: "center",
+        },
+        style,
+      ]}
+    >
+      {MAPPING[name]}
+    </Text>
+  );
 }
