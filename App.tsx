@@ -11,7 +11,7 @@ import {
 import { CameraView, useCameraPermissions } from "expo-camera";
 
 type Difficulty = "EASY" | "NORMAL" | "HARD";
-type Screen = "home" | "rules" | "play" | "result" | "camera";
+type Screen = "home" | "rules" | "play" | "result" | "camera" | "cameraPlay";
 type BallType = "NORMAL" | "BLUE" | "GOLD";
 type ShotResult = "PERFECT" | "GOOD" | "MISS" | "AVOID";
 type RecognitionRange = "FULL_BODY" | "LOWER_BODY" | "FEET";
@@ -195,6 +195,20 @@ export default function App() {
     setScreen("play");
   };
 
+  const startCameraGame = () => {
+    const nextConfig = configs[difficulty];
+    setStats(initialStats);
+    setBalls([]);
+    setTimeLeft(nextConfig.timeLimit);
+    setIsPaused(false);
+    setMessage("カメラ判定準備中");
+    elapsedRef.current = 0;
+    spawnElapsedRef.current = nextConfig.spawnMs;
+    lastTickRef.current = Date.now();
+    ballIdRef.current = 1;
+    setScreen("cameraPlay");
+  };
+
   const finishGame = () => {
     setBalls([]);
     setIsPaused(false);
@@ -232,7 +246,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (screen !== "play") return;
+    if (screen !== "play" && screen !== "cameraPlay") return;
     const timer = setInterval(() => {
       if (isPaused) {
         lastTickRef.current = Date.now();
@@ -299,7 +313,7 @@ export default function App() {
   }, [config, fieldSize, isPaused, screen]);
 
   const shoot = () => {
-    if (screen !== "play" || isPaused) return;
+    if ((screen !== "play" && screen !== "cameraPlay") || isPaused) return;
 
     const candidates = balls
       .map((ball) => {
@@ -360,13 +374,25 @@ export default function App() {
         {screen === "home" && (
           <ScrollView contentContainerStyle={styles.homeContent}>
             <View style={styles.hero}>
-              <Text style={styles.title}>ボレーシュート</Text>
-              <Text style={styles.subtitle}>チャレンジ</Text>
-              <Text style={styles.caption}>VOLLEY SHOOT CHALLENGE</Text>
+              <View style={styles.stadiumLights}>
+                <View style={styles.lightBeam} />
+                <View style={[styles.lightBeam, styles.lightBeamRight]} />
+              </View>
+              <View style={styles.heroAction}>
+                <View style={styles.motionTrail} />
+                <View style={styles.heroLeg} />
+                <View style={styles.heroBoot} />
+                <View style={styles.heroBall}>
+                  <View style={styles.heroBallPatch} />
+                </View>
+              </View>
+              <Text style={styles.title}>ボレチャレ</Text>
+              <Text style={styles.subtitle}>VOLLEY SHOOT</Text>
+              <Text style={styles.caption}>空中の一瞬を撃ち抜け</Text>
             </View>
 
             <Text style={styles.description}>
-              飛んでくるボールがキックゾーンに重なった瞬間にシュート。金色は高得点、青色は蹴らずに回避します。
+              飛んでくるボールを、足元のキックゾーンで叩き込む反応トレーニング。カメラモードでは実際のフォームに近い感覚で試せます。
             </Text>
 
             <Text style={styles.sectionTitle}>難易度</Text>
@@ -512,6 +538,100 @@ export default function App() {
               <Text style={styles.cameraHint}>
                 通常プレーは下半身で十分です。全身はフォーム分析、足元は近距離プレー用です。
               </Text>
+              {cameraPermission?.granted && (
+                <Pressable style={styles.cameraStartButton} onPress={startCameraGame}>
+                  <Text style={styles.cameraStartText}>この画面でプレー開始</Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        )}
+
+        {screen === "cameraPlay" && (
+          <View style={styles.cameraPlayRoot}>
+            <View
+              style={styles.cameraPlayField}
+              onLayout={(event) => {
+                const { width, height } = event.nativeEvent.layout;
+                setFieldSize({ width, height });
+              }}
+            >
+              <CameraView style={styles.cameraPlayPreview} facing="front" />
+              <Pressable style={styles.cameraPlayOverlay} onPress={shoot}>
+                <View style={styles.cameraPlayHud}>
+                  <Text style={styles.cameraPlayHudText}>SCORE {stats.score}</Text>
+                  <Text style={[styles.cameraPlayHudText, timeLeft < 10 && styles.warningText]}>
+                    TIME {Math.ceil(timeLeft)}
+                  </Text>
+                  <Text style={styles.cameraPlayHudText}>COMBO {stats.combo}</Text>
+                </View>
+
+                <View
+                  style={[
+                    styles.strikeZone,
+                    {
+                      left: strikeZone.x - strikeZone.good,
+                      top: strikeZone.y - strikeZone.good,
+                      width: strikeZone.good * 2,
+                      height: strikeZone.good * 2,
+                      borderRadius: strikeZone.good,
+                    },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.perfectZone,
+                    {
+                      left: strikeZone.x - strikeZone.perfect,
+                      top: strikeZone.y - strikeZone.perfect,
+                      width: strikeZone.perfect * 2,
+                      height: strikeZone.perfect * 2,
+                      borderRadius: strikeZone.perfect,
+                    },
+                  ]}
+                />
+
+                {balls.map((ball) => (
+                  <View
+                    key={ball.id}
+                    style={[
+                      styles.ball,
+                      ball.type === "BLUE" && styles.blueBall,
+                      ball.type === "GOLD" && styles.goldBall,
+                      {
+                        left: ball.x - ball.radius,
+                        top: ball.y - ball.radius,
+                        width: ball.radius * 2,
+                        height: ball.radius * 2,
+                        borderRadius: ball.radius,
+                        transform: [{ rotate: `${ball.spin}deg` }],
+                      },
+                    ]}
+                  >
+                    <View style={styles.ballPatch} />
+                  </View>
+                ))}
+
+                <Text style={styles.cameraPlayMessage}>{message}</Text>
+
+                <View style={styles.cameraPlayControls}>
+                  <Pressable style={styles.cameraPlayMiniButton} onPress={() => setIsPaused((value) => !value)}>
+                    <Text style={styles.cameraPlayMiniText}>{isPaused ? "再開" : "停止"}</Text>
+                  </Pressable>
+                  <Pressable style={styles.cameraPlayShotButton} onPress={shoot}>
+                    <Text style={styles.cameraPlayShotText}>SHOT</Text>
+                  </Pressable>
+                  <Pressable style={styles.cameraPlayMiniButton} onPress={finishGame}>
+                    <Text style={styles.cameraPlayMiniText}>終了</Text>
+                  </Pressable>
+                </View>
+
+                {isPaused && (
+                  <View style={styles.pauseOverlay}>
+                    <Text style={styles.pauseText}>PAUSED</Text>
+                  </View>
+                )}
+              </Pressable>
             </View>
           </View>
         )}
@@ -671,28 +791,111 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   hero: {
-    paddingVertical: 26,
+    minHeight: 230,
+    paddingVertical: 20,
     paddingHorizontal: 18,
     borderRadius: 8,
-    backgroundColor: "#102C3C",
+    backgroundColor: "#07121F",
     borderWidth: 1,
-    borderColor: "rgba(0, 217, 255, 0.35)",
+    borderColor: "rgba(0, 217, 255, 0.42)",
+    overflow: "hidden",
+    justifyContent: "flex-end",
+  },
+  stadiumLights: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  lightBeam: {
+    position: "absolute",
+    top: -56,
+    left: 14,
+    width: 170,
+    height: 250,
+    backgroundColor: "rgba(0,217,255,0.11)",
+    transform: [{ rotate: "28deg" }],
+  },
+  lightBeamRight: {
+    left: undefined,
+    right: 22,
+    backgroundColor: "rgba(71,209,108,0.1)",
+    transform: [{ rotate: "-26deg" }],
+  },
+  heroAction: {
+    position: "absolute",
+    top: 12,
+    right: 16,
+    width: 250,
+    height: 180,
+  },
+  motionTrail: {
+    position: "absolute",
+    left: 8,
+    top: 102,
+    width: 190,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "rgba(0,217,255,0.78)",
+    transform: [{ rotate: "-24deg" }],
+  },
+  heroLeg: {
+    position: "absolute",
+    left: 38,
+    bottom: 18,
+    width: 118,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 3,
+    borderColor: "#08111F",
+    transform: [{ rotate: "-38deg" }],
+  },
+  heroBoot: {
+    position: "absolute",
+    left: 126,
+    bottom: 65,
+    width: 68,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: "#08111F",
+    borderWidth: 2,
+    borderColor: "#00D9FF",
+    transform: [{ rotate: "18deg" }],
+  },
+  heroBall: {
+    position: "absolute",
+    right: 10,
+    top: 18,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 4,
+    borderColor: "#08111F",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroBallPatch: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    backgroundColor: "#08111F",
+    transform: [{ rotate: "18deg" }],
   },
   title: {
     color: "#FFFFFF",
-    fontSize: 34,
-    fontWeight: "800",
+    fontSize: 42,
+    fontWeight: "900",
   },
   subtitle: {
     color: "#00D9FF",
-    fontSize: 30,
-    fontWeight: "800",
-    marginTop: 2,
+    fontSize: 19,
+    fontWeight: "900",
+    marginTop: 0,
   },
   caption: {
-    color: "rgba(255,255,255,0.72)",
-    fontSize: 12,
-    marginTop: 12,
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 13,
+    fontWeight: "700",
+    marginTop: 8,
   },
   titleSmall: {
     color: "#FFFFFF",
@@ -715,7 +918,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 8,
     borderWidth: 1,
-    backgroundColor: "rgba(255,255,255,0.055)",
+    backgroundColor: "rgba(3,12,22,0.78)",
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -1025,6 +1228,109 @@ const styles = StyleSheet.create({
     color: "#94A3B8",
     fontSize: 10,
     textAlign: "center",
+  },
+  cameraStartButton: {
+    marginTop: 6,
+    minHeight: 34,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,217,255,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(0,217,255,0.45)",
+  },
+  cameraStartText: {
+    color: "#00D9FF",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  cameraPlayRoot: {
+    flex: 1,
+    backgroundColor: "#050A12",
+  },
+  cameraPlayField: {
+    flex: 1,
+    backgroundColor: "#050A12",
+  },
+  cameraPlayPreview: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  cameraPlayOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.04)",
+  },
+  cameraPlayHud: {
+    position: "absolute",
+    top: 8,
+    left: 8,
+    right: 8,
+    minHeight: 34,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "rgba(8,17,31,0.38)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+  },
+  cameraPlayHudText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  cameraPlayMessage: {
+    position: "absolute",
+    left: 10,
+    right: 10,
+    bottom: 54,
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "900",
+    textAlign: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: "rgba(8,17,31,0.36)",
+  },
+  cameraPlayControls: {
+    position: "absolute",
+    left: 10,
+    right: 10,
+    bottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+  cameraPlayMiniButton: {
+    flex: 1,
+    minHeight: 36,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(8,17,31,0.38)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+  },
+  cameraPlayMiniText: {
+    color: "#DCE7F3",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  cameraPlayShotButton: {
+    flex: 1.45,
+    minHeight: 42,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,217,255,0.72)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
+  },
+  cameraPlayShotText: {
+    color: "#08111F",
+    fontSize: 19,
+    fontWeight: "900",
   },
   playRoot: {
     flex: 1,
