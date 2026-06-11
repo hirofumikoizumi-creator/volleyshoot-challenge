@@ -14,7 +14,6 @@ type Difficulty = "EASY" | "NORMAL" | "HARD";
 type Screen = "home" | "rules" | "play" | "result" | "camera";
 type BallType = "NORMAL" | "BLUE" | "GOLD";
 type ShotResult = "PERFECT" | "GOOD" | "MISS" | "AVOID";
-type CameraFacing = "front" | "back";
 type RecognitionRange = "FULL_BODY" | "LOWER_BODY" | "FEET";
 
 type Ball = {
@@ -160,7 +159,6 @@ export default function App() {
   const [isPaused, setIsPaused] = useState(false);
   const [message, setMessage] = useState("タイミングを合わせてシュート");
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const [cameraFacing, setCameraFacing] = useState<CameraFacing>("front");
   const [recognitionRange, setRecognitionRange] = useState<RecognitionRange>("LOWER_BODY");
 
   const ballIdRef = useRef(1);
@@ -441,8 +439,14 @@ export default function App() {
 
             <View style={styles.cameraPreviewFrame}>
               {cameraPermission?.granted ? (
-                <CameraView style={styles.cameraPreview} facing={cameraFacing}>
+                <CameraView style={styles.cameraPreview} facing="front">
                   <View style={styles.cameraOverlay}>
+                    <View style={styles.cameraFloatingTop}>
+                      <Text style={styles.cameraFloatingStatus}>
+                        {recognitionLabels[recognitionRange].status}
+                      </Text>
+                    </View>
+
                     {recognitionRange === "FULL_BODY" && (
                       <>
                         <View style={styles.poseGuideHead} />
@@ -467,6 +471,28 @@ export default function App() {
                       </>
                     )}
                     <Text style={styles.cameraOverlayText}>{recognitionLabels[recognitionRange].hint}</Text>
+
+                    <View style={styles.cameraFloatingControls}>
+                      {(["FULL_BODY", "LOWER_BODY", "FEET"] as RecognitionRange[]).map((item) => (
+                        <Pressable
+                          key={item}
+                          style={[
+                            styles.recognitionTab,
+                            recognitionRange === item && styles.recognitionTabActive,
+                          ]}
+                          onPress={() => setRecognitionRange(item)}
+                        >
+                          <Text
+                            style={[
+                              styles.recognitionTabText,
+                              recognitionRange === item && styles.recognitionTabTextActive,
+                            ]}
+                          >
+                            {recognitionLabels[item].label}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
                   </View>
                 </CameraView>
               ) : (
@@ -483,57 +509,6 @@ export default function App() {
             </View>
 
             <View style={styles.cameraFooter}>
-              <View style={styles.cameraControlRow}>
-                <Pressable
-                  style={[styles.cameraToggleButton, cameraFacing === "front" && styles.cameraToggleActive]}
-                  onPress={() => setCameraFacing("front")}
-                >
-                  <Text
-                    style={[
-                      styles.cameraToggleText,
-                      cameraFacing === "front" && styles.cameraToggleTextActive,
-                    ]}
-                  >
-                    前面
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.cameraToggleButton, cameraFacing === "back" && styles.cameraToggleActive]}
-                  onPress={() => setCameraFacing("back")}
-                >
-                  <Text
-                    style={[
-                      styles.cameraToggleText,
-                      cameraFacing === "back" && styles.cameraToggleTextActive,
-                    ]}
-                  >
-                    背面
-                  </Text>
-                </Pressable>
-              </View>
-
-              <View style={styles.recognitionTabs}>
-                {(["FULL_BODY", "LOWER_BODY", "FEET"] as RecognitionRange[]).map((item) => (
-                  <Pressable
-                    key={item}
-                    style={[
-                      styles.recognitionTab,
-                      recognitionRange === item && styles.recognitionTabActive,
-                    ]}
-                    onPress={() => setRecognitionRange(item)}
-                  >
-                    <Text
-                      style={[
-                        styles.recognitionTabText,
-                        recognitionRange === item && styles.recognitionTabTextActive,
-                      ]}
-                    >
-                      {recognitionLabels[item].label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-
               <Text style={styles.cameraHint}>
                 通常プレーは下半身で十分です。全身はフォーム分析、足元は近距離プレー用です。
               </Text>
@@ -815,9 +790,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#08111F",
   },
   cameraHeader: {
-    minHeight: 76,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    minHeight: 54,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderBottomWidth: 1,
     borderBottomColor: "rgba(255,255,255,0.1)",
     flexDirection: "row",
@@ -827,32 +802,32 @@ const styles = StyleSheet.create({
   },
   cameraTitle: {
     color: "#FFFFFF",
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: "900",
   },
   cameraStatus: {
     color: "#94A3B8",
-    fontSize: 12,
-    marginTop: 4,
+    fontSize: 10,
+    marginTop: 2,
   },
   headerButton: {
-    minWidth: 72,
-    minHeight: 42,
+    minWidth: 56,
+    minHeight: 34,
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255,255,255,0.11)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
   },
   headerButtonText: {
     color: "#DCE7F3",
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: "800",
   },
   cameraPreviewFrame: {
     flex: 1,
-    margin: 12,
+    margin: 6,
     borderRadius: 8,
     overflow: "hidden",
     backgroundColor: "#050A12",
@@ -866,7 +841,31 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(0,0,0,0.02)",
+  },
+  cameraFloatingTop: {
+    position: "absolute",
+    top: 8,
+    left: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: "rgba(8,17,31,0.38)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+  },
+  cameraFloatingStatus: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  cameraFloatingControls: {
+    position: "absolute",
+    left: 10,
+    right: 10,
+    bottom: 8,
+    flexDirection: "row",
+    gap: 6,
   },
   poseGuideHead: {
     width: 54,
@@ -966,14 +965,16 @@ const styles = StyleSheet.create({
   },
   cameraOverlayText: {
     position: "absolute",
-    bottom: 20,
+    bottom: 54,
+    maxWidth: "86%",
     color: "#FFFFFF",
-    fontSize: 15,
+    fontSize: 11,
     fontWeight: "800",
-    backgroundColor: "rgba(8,17,31,0.72)",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    backgroundColor: "rgba(8,17,31,0.42)",
+    paddingHorizontal: 9,
+    paddingVertical: 5,
     borderRadius: 8,
+    textAlign: "center",
   },
   permissionPanel: {
     flex: 1,
@@ -995,57 +996,26 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   cameraFooter: {
-    paddingHorizontal: 14,
-    paddingBottom: 12,
-    gap: 10,
-  },
-  cameraControlRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  cameraToggleButton: {
-    flex: 1,
-    minHeight: 42,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-  },
-  cameraToggleActive: {
-    backgroundColor: "rgba(0,217,255,0.18)",
-    borderColor: "rgba(0,217,255,0.55)",
-  },
-  cameraToggleText: {
-    color: "#DCE7F3",
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  cameraToggleTextActive: {
-    color: "#00D9FF",
-  },
-  recognitionTabs: {
-    flexDirection: "row",
-    gap: 8,
+    paddingHorizontal: 10,
+    paddingBottom: 6,
   },
   recognitionTab: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 32,
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.07)",
+    backgroundColor: "rgba(8,17,31,0.36)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+    borderColor: "rgba(255,255,255,0.16)",
   },
   recognitionTabActive: {
-    backgroundColor: "rgba(71,209,108,0.18)",
-    borderColor: "rgba(71,209,108,0.55)",
+    backgroundColor: "rgba(71,209,108,0.34)",
+    borderColor: "rgba(71,209,108,0.68)",
   },
   recognitionTabText: {
     color: "#DCE7F3",
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: "900",
   },
   recognitionTabTextActive: {
@@ -1053,7 +1023,7 @@ const styles = StyleSheet.create({
   },
   cameraHint: {
     color: "#94A3B8",
-    fontSize: 12,
+    fontSize: 10,
     textAlign: "center",
   },
   playRoot: {
