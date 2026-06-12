@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { Camera, useCameraDevice, useCameraPermission, useFrameProcessor } from "react-native-vision-camera";
+import { Camera, runAtTargetFps, useCameraDevice, useCameraPermission, useFrameProcessor } from "react-native-vision-camera";
 import { useTensorflowModel } from "react-native-fast-tflite";
 import { useRunOnJS } from "react-native-worklets-core";
 import { useResizePlugin } from "vision-camera-resize-plugin";
@@ -16,6 +16,7 @@ type OnDeviceVolleyCameraProps = {
   latestPose?: PoseFrame;
   showStatusBadge?: boolean;
   onFootDetected?: (point: { x: number; y: number; confidence: number }) => void;
+  onInferenceStatus?: (status: { ready: boolean; confidence: number; error?: string }) => void;
 };
 
 const MODEL_INPUT_SIZE = 256;
@@ -66,6 +67,7 @@ export function OnDeviceVolleyCamera({
   latestPose,
   showStatusBadge = false,
   onFootDetected,
+  onInferenceStatus,
 }: OnDeviceVolleyCameraProps) {
   const device = useCameraDevice("front");
   const { hasPermission, requestPermission } = useCameraPermission();
@@ -77,6 +79,9 @@ export function OnDeviceVolleyCamera({
   const reportFoot = useRunOnJS((x: number, y: number, confidence: number) => {
     onFootDetected?.({ x, y, confidence });
   }, [onFootDetected]);
+  const reportStatus = useRunOnJS((ready: boolean, confidence: number, error?: string) => {
+    onInferenceStatus?.({ ready, confidence, error });
+  }, [onInferenceStatus]);
 
   useEffect(() => {
     setModelError(null);
@@ -84,22 +89,25 @@ export function OnDeviceVolleyCamera({
     if (!modelAsset) {
       setModelError("BlazePose Lite model asset is not configured yet.");
       setModelReady(false);
+      onInferenceStatus?.({ ready: false, confidence: 0, error: "model-missing" });
       return;
     }
 
     if (modelState.state === "loaded") {
       setModelReady(true);
+      onInferenceStatus?.({ ready: true, confidence: 0 });
       return;
     }
 
     if (modelState.state === "error") {
       setModelError(modelState.error.message);
       setModelReady(false);
+      onInferenceStatus?.({ ready: false, confidence: 0, error: modelState.error.message });
       return;
     }
 
     setModelReady(false);
-  }, [modelAsset, modelState, setModelReady]);
+  }, [modelAsset, modelState, onInferenceStatus, setModelReady]);
 
   useEffect(() => {
     if (!hasPermission) {
@@ -113,26 +121,34 @@ export function OnDeviceVolleyCamera({
     "worklet";
     if (model == null) return;
 
-    const input = resize(frame, {
-      scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
-      mirror: true,
-      pixelFormat: "rgb",
-      dataType: "float32",
+    runAtTargetFps(15, () => {
+      "worklet";
+      const input = resize(frame, {
+        scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
+        mirror: true,
+        pixelFormat: "rgb",
+        dataType: "float32",
+      });
+
+      const outputs = model.runSync([input.buffer as ArrayBuffer]);
+      const landmarkBuffer = outputs.find((output) => output.byteLength >= 33 * LANDMARK_STRIDE * 4);
+      if (landmarkBuffer == null) {
+        reportStatus(true, 0, "landmarks-missing");
+        return;
+      }
+
+      const landmarks = new Float32Array(landmarkBuffer);
+      const leftFoot = contactFromSide(landmarks, LEFT_ANKLE, LEFT_HEEL, LEFT_FOOT_INDEX);
+      const rightFoot = contactFromSide(landmarks, RIGHT_ANKLE, RIGHT_HEEL, RIGHT_FOOT_INDEX);
+      const bestFoot =
+        (leftFoot?.confidence ?? 0) >= (rightFoot?.confidence ?? 0) ? leftFoot : rightFoot;
+
+      const confidence = bestFoot?.confidence ?? 0;
+      reportStatus(true, confidence);
+      if (!bestFoot || confidence < 0.6) return;
+      reportFoot(bestFoot.x * width, bestFoot.y * height, confidence);
     });
-
-    const outputs = model.runSync([input.buffer as ArrayBuffer]);
-    const landmarkBuffer = outputs.find((output) => output.byteLength >= 33 * LANDMARK_STRIDE * 4);
-    if (landmarkBuffer == null) return;
-
-    const landmarks = new Float32Array(landmarkBuffer);
-    const leftFoot = contactFromSide(landmarks, LEFT_ANKLE, LEFT_HEEL, LEFT_FOOT_INDEX);
-    const rightFoot = contactFromSide(landmarks, RIGHT_ANKLE, RIGHT_HEEL, RIGHT_FOOT_INDEX);
-    const bestFoot =
-      (leftFoot?.confidence ?? 0) >= (rightFoot?.confidence ?? 0) ? leftFoot : rightFoot;
-
-    if (!bestFoot || bestFoot.confidence < 0.6) return;
-    reportFoot(bestFoot.x * width, bestFoot.y * height, bestFoot.confidence);
-  }, [model, reportFoot, resize, width, height]);
+  }, [model, reportFoot, reportStatus, resize, width, height]);
 
   if (!hasPermission) {
     return (

@@ -36,6 +36,14 @@ type FootTracker = {
   ready: boolean;
   lastTs: number;
 };
+type FootInputSource = "AI" | "MANUAL";
+type FootInputStatus = {
+  source: FootInputSource;
+  confidence: number;
+  aiReady: boolean;
+  lastDetectedAt: number;
+  error?: string;
+};
 
 type GameStats = {
   score: number;
@@ -128,6 +136,12 @@ const initialFootTracker: FootTracker = {
   ready: false,
   lastTs: 0,
 };
+const initialFootInputStatus: FootInputStatus = {
+  source: "MANUAL",
+  confidence: 0,
+  aiReady: false,
+  lastDetectedAt: 0,
+};
 const blazePoseLiteModel = require("./assets/models/blazepose_lite.tflite");
 
 function randomBetween(min: number, max: number) {
@@ -186,6 +200,7 @@ export default function App() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [recognitionRange, setRecognitionRange] = useState<RecognitionRange>("LOWER_BODY");
   const [footTracker, setFootTracker] = useState<FootTracker>(initialFootTracker);
+  const [footInputStatus, setFootInputStatus] = useState<FootInputStatus>(initialFootInputStatus);
 
   const ballIdRef = useRef(1);
   const lastTickRef = useRef(Date.now());
@@ -238,6 +253,7 @@ export default function App() {
     setIsPaused(false);
     setMessage(nextMessage);
     setFootTracker(initialFootTracker);
+    setFootInputStatus(initialFootInputStatus);
     footTrackerRef.current = initialFootTracker;
     elapsedRef.current = 0;
     spawnElapsedRef.current = nextConfig.spawnMs;
@@ -442,16 +458,26 @@ export default function App() {
     shootAt(strikeZone, strikeZone.good, strikeZone.perfect, "button");
   };
 
-  const registerFootPosition = (x: number, y: number) => {
+  const registerFootPosition = (x: number, y: number, source: FootInputSource = "MANUAL", confidence = 1) => {
     const now = Date.now();
     const previous = footTrackerRef.current;
+    const smoothing = source === "AI" ? Math.max(0.3, Math.min(0.72, confidence)) : 1;
+    const smoothedX = previous.ready ? previous.x + (x - previous.x) * smoothing : x;
+    const smoothedY = previous.ready ? previous.y + (y - previous.y) * smoothing : y;
     const elapsed = Math.max(16, now - (previous.lastTs || now - 16));
-    const dx = x - previous.x;
-    const dy = y - previous.y;
+    const dx = smoothedX - previous.x;
+    const dy = smoothedY - previous.y;
     const speed = Math.sqrt(dx * dx + dy * dy) / elapsed;
-    const next = { x, y, speed, ready: true, lastTs: now };
+    const next = { x: smoothedX, y: smoothedY, speed, ready: true, lastTs: now };
     footTrackerRef.current = next;
     setFootTracker(next);
+    setFootInputStatus((current) => ({
+      ...current,
+      source,
+      confidence,
+      lastDetectedAt: now,
+      error: source === "AI" ? undefined : current.error,
+    }));
 
     if (screen === "cameraPlay" && speed > 0.72 && now - lastAutoKickRef.current > 220) {
       lastAutoKickRef.current = now;
@@ -672,7 +698,15 @@ export default function App() {
                   width={fieldSize.width}
                   height={fieldSize.height}
                   modelAsset={blazePoseLiteModel}
-                  onFootDetected={(point) => registerFootPosition(point.x, point.y)}
+                  onFootDetected={(point) => registerFootPosition(point.x, point.y, "AI", point.confidence)}
+                  onInferenceStatus={(status) =>
+                    setFootInputStatus((current) => ({
+                      ...current,
+                      aiReady: status.ready,
+                      confidence: status.confidence,
+                      error: status.error,
+                    }))
+                  }
                 />
               ) : (
                 <CameraView style={styles.cameraPlayPreview} facing="front" />
@@ -684,6 +718,14 @@ export default function App() {
                     TIME {Math.ceil(timeLeft)}
                   </Text>
                   <Text style={styles.cameraPlayHudText}>COMBO {stats.combo}</Text>
+                </View>
+                <View style={styles.aiStatusPill}>
+                  <Text style={styles.aiStatusText}>
+                    {footInputStatus.aiReady ? "AI FOOT" : "AI LOADING"} {Math.round(footInputStatus.confidence * 100)}%
+                  </Text>
+                  <Text style={styles.aiStatusSubText}>
+                    {footInputStatus.source === "AI" ? "AUTO" : "TOUCH BACKUP"}
+                  </Text>
                 </View>
 
                 <View style={styles.volleyLane} />
@@ -762,11 +804,11 @@ export default function App() {
                 style={styles.footTouchLayer}
                 onTouchStart={(event) => {
                   const touch = event.nativeEvent;
-                  registerFootPosition(touch.locationX, touch.locationY);
+                  registerFootPosition(touch.locationX, touch.locationY, "MANUAL", 1);
                 }}
                 onTouchMove={(event) => {
                   const touch = event.nativeEvent;
-                  registerFootPosition(touch.locationX, touch.locationY);
+                  registerFootPosition(touch.locationX, touch.locationY, "MANUAL", 1);
                 }}
               />
             </View>
@@ -1511,6 +1553,33 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 11,
     fontWeight: "900",
+  },
+  aiStatusPill: {
+    position: "absolute",
+    top: 48,
+    right: 8,
+    minWidth: 104,
+    minHeight: 38,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(8,17,31,0.42)",
+    borderWidth: 1,
+    borderColor: "rgba(163,255,18,0.28)",
+    zIndex: 12,
+  },
+  aiStatusText: {
+    color: "#A3FF12",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  aiStatusSubText: {
+    color: "#DCE7F3",
+    fontSize: 8,
+    fontWeight: "900",
+    marginTop: 2,
   },
   cameraPlayMessage: {
     position: "absolute",
