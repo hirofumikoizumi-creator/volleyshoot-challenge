@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ImageBackground,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -25,6 +26,14 @@ type Ball = {
   radius: number;
   type: BallType;
   spin: number;
+};
+
+type FootTracker = {
+  x: number;
+  y: number;
+  speed: number;
+  ready: boolean;
+  lastTs: number;
 };
 
 type GameStats = {
@@ -111,8 +120,22 @@ const recognitionLabels: Record<RecognitionRange, { label: string; status: strin
   },
 };
 
+const initialFootTracker: FootTracker = {
+  x: 180,
+  y: 380,
+  speed: 0,
+  ready: false,
+  lastTs: 0,
+};
+
 function randomBetween(min: number, max: number) {
   return min + Math.random() * (max - min);
+}
+
+function recognitionScale(range: RecognitionRange) {
+  if (range === "FULL_BODY") return 0.72;
+  if (range === "FEET") return 1.34;
+  return 1;
 }
 
 function pickBallType(config: PlayConfig): BallType {
@@ -160,13 +183,25 @@ export default function App() {
   const [message, setMessage] = useState("タイミングを合わせてシュート");
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [recognitionRange, setRecognitionRange] = useState<RecognitionRange>("LOWER_BODY");
+  const [footTracker, setFootTracker] = useState<FootTracker>(initialFootTracker);
 
   const ballIdRef = useRef(1);
   const lastTickRef = useRef(Date.now());
   const elapsedRef = useRef(0);
   const spawnElapsedRef = useRef(0);
+  const footTrackerRef = useRef<FootTracker>(initialFootTracker);
+  const lastAutoKickRef = useRef(0);
 
   const config = configs[difficulty];
+  const bodyScale = screen === "cameraPlay" ? recognitionScale(recognitionRange) : 1;
+  const footReach = useMemo(() => {
+    const base = Math.min(fieldSize.width || 360, fieldSize.height || 520);
+    return {
+      perfect: base * (0.055 + bodyScale * 0.018),
+      good: base * (0.1 + bodyScale * 0.028),
+      marker: base * (0.035 + bodyScale * 0.014),
+    };
+  }, [bodyScale, fieldSize]);
   const strikeZone = useMemo(() => {
     const width = fieldSize.width || 360;
     const height = fieldSize.height || 520;
@@ -180,6 +215,18 @@ export default function App() {
 
   const accuracy = stats.shots === 0 ? 0 : Math.round((stats.hits / stats.shots) * 100);
 
+  useEffect(() => {
+    if (fieldSize.width <= 0 || fieldSize.height <= 0 || footTracker.ready) return;
+    const next = {
+      ...footTrackerRef.current,
+      x: fieldSize.width * 0.5,
+      y: fieldSize.height * 0.76,
+      ready: true,
+    };
+    footTrackerRef.current = next;
+    setFootTracker(next);
+  }, [fieldSize, footTracker.ready]);
+
   const startGame = (nextDifficulty: Difficulty) => {
     const nextConfig = configs[nextDifficulty];
     setDifficulty(nextDifficulty);
@@ -188,6 +235,8 @@ export default function App() {
     setTimeLeft(nextConfig.timeLimit);
     setIsPaused(false);
     setMessage("タイミングを合わせてシュート");
+    setFootTracker(initialFootTracker);
+    footTrackerRef.current = initialFootTracker;
     elapsedRef.current = 0;
     spawnElapsedRef.current = nextConfig.spawnMs;
     lastTickRef.current = Date.now();
@@ -201,7 +250,15 @@ export default function App() {
     setBalls([]);
     setTimeLeft(nextConfig.timeLimit);
     setIsPaused(false);
-    setMessage("カメラ判定準備中");
+    setMessage("足をボールへ振り抜くと自動判定");
+    const nextFoot = {
+      ...initialFootTracker,
+      x: fieldSize.width > 0 ? fieldSize.width * 0.5 : initialFootTracker.x,
+      y: fieldSize.height > 0 ? fieldSize.height * 0.76 : initialFootTracker.y,
+      ready: fieldSize.width > 0 && fieldSize.height > 0,
+    };
+    footTrackerRef.current = nextFoot;
+    setFootTracker(nextFoot);
     elapsedRef.current = 0;
     spawnElapsedRef.current = nextConfig.spawnMs;
     lastTickRef.current = Date.now();
@@ -219,9 +276,13 @@ export default function App() {
     if (fieldSize.width <= 0 || fieldSize.height <= 0) return;
     const fromLeft = Math.random() > 0.5;
     const speed = randomBetween(config.speedMin, config.speedMax);
-    const startY = randomBetween(fieldSize.height * 0.23, fieldSize.height * 0.42);
-    const targetY = randomBetween(fieldSize.height * 0.58, fieldSize.height * 0.78);
-    const targetX = fieldSize.width * randomBetween(0.38, 0.62);
+    const isCameraVolley = screen === "cameraPlay";
+    const startY = randomBetween(fieldSize.height * 0.18, fieldSize.height * 0.46);
+    const targetY = randomBetween(
+      fieldSize.height * (isCameraVolley ? 0.3 : 0.58),
+      fieldSize.height * (isCameraVolley ? 0.82 : 0.78),
+    );
+    const targetX = fieldSize.width * randomBetween(isCameraVolley ? 0.16 : 0.38, isCameraVolley ? 0.84 : 0.62);
     const startX = fromLeft ? -34 : fieldSize.width + 34;
     const distanceX = targetX - startX;
     const framesToTarget = Math.max(32, Math.abs(distanceX) / speed);
@@ -229,6 +290,7 @@ export default function App() {
     const vy = (targetY - startY - config.gravity * framesToTarget * framesToTarget * 0.5) / framesToTarget;
 
     const type = pickBallType(config);
+    const baseRadius = type === "GOLD" ? 18 : 16;
 
     setBalls((current) => [
       ...current,
@@ -238,7 +300,7 @@ export default function App() {
         y: startY,
         vx,
         vy,
-        radius: type === "GOLD" ? 18 : 16,
+        radius: Math.round(baseRadius * bodyScale),
         type,
         spin: randomBetween(-5, 5),
       },
@@ -312,19 +374,20 @@ export default function App() {
     return () => clearInterval(timer);
   }, [config, fieldSize, isPaused, screen]);
 
-  const shoot = () => {
+  const shootAt = (anchor: { x: number; y: number }, goodReach: number, perfectReach: number, source: "button" | "foot") => {
     if ((screen !== "play" && screen !== "cameraPlay") || isPaused) return;
 
     const candidates = balls
       .map((ball) => {
-        const dx = ball.x - strikeZone.x;
-        const dy = ball.y - strikeZone.y;
-        return { ball, distance: Math.sqrt(dx * dx + dy * dy) };
+        const dx = ball.x - anchor.x;
+        const dy = ball.y - anchor.y;
+        const centerDistance = Math.sqrt(dx * dx + dy * dy);
+        return { ball, distance: Math.max(0, centerDistance - ball.radius) };
       })
       .sort((a, b) => a.distance - b.distance);
 
     const best = candidates[0];
-    if (!best || best.distance > strikeZone.good) {
+    if (!best || best.distance > goodReach) {
       setStats((current) => ({
         ...current,
         shots: current.shots + 1,
@@ -333,11 +396,11 @@ export default function App() {
         combo: 0,
         lastResult: "MISS",
       }));
-      setMessage("空振り");
+      setMessage(source === "foot" ? "足は振れています。ボールに近づけて" : "空振り");
       return;
     }
 
-    const result: ShotResult = best.distance <= strikeZone.perfect ? "PERFECT" : "GOOD";
+    const result: ShotResult = best.distance <= perfectReach ? "PERFECT" : "GOOD";
 
     setBalls((current) => current.filter((ball) => ball.id !== best.ball.id));
     setStats((current) => {
@@ -364,7 +427,33 @@ export default function App() {
         lastResult: result,
       };
     });
-    setMessage(best.ball.type === "BLUE" ? "青ボールを蹴って減点" : `${resultLabel(result)} SHOT`);
+    setMessage(best.ball.type === "BLUE" ? "青ボールを蹴って減点" : `${resultLabel(result)} VOLLEY`);
+  };
+
+  const shoot = () => {
+    if (screen === "cameraPlay") {
+      const anchor = footTracker.ready ? footTracker : { x: fieldSize.width * 0.5, y: fieldSize.height * 0.76 };
+      shootAt(anchor, footReach.good, footReach.perfect, "button");
+      return;
+    }
+    shootAt(strikeZone, strikeZone.good, strikeZone.perfect, "button");
+  };
+
+  const registerFootPosition = (x: number, y: number) => {
+    const now = Date.now();
+    const previous = footTrackerRef.current;
+    const elapsed = Math.max(16, now - (previous.lastTs || now - 16));
+    const dx = x - previous.x;
+    const dy = y - previous.y;
+    const speed = Math.sqrt(dx * dx + dy * dy) / elapsed;
+    const next = { x, y, speed, ready: true, lastTs: now };
+    footTrackerRef.current = next;
+    setFootTracker(next);
+
+    if (screen === "cameraPlay" && speed > 0.72 && now - lastAutoKickRef.current > 220) {
+      lastAutoKickRef.current = now;
+      shootAt(next, footReach.good, footReach.perfect, "foot");
+    }
   };
 
   return (
@@ -386,13 +475,23 @@ export default function App() {
                   <View style={styles.heroBallPatch} />
                 </View>
               </View>
-              <Text style={styles.title}>ボレチャレ</Text>
-              <Text style={styles.subtitle}>VOLLEY SHOOT</Text>
-              <Text style={styles.caption}>空中の一瞬を撃ち抜け</Text>
+              <ImageBackground
+                source={require("./assets/images/icon.png")}
+                style={styles.heroImage}
+                imageStyle={styles.heroImageAsset}
+              >
+                <View style={styles.heroShade} />
+                <View style={styles.titlePlate}>
+                  <Text style={styles.titleKicker}>REAL CAMERA FOOTBALL</Text>
+                  <Text style={styles.title}>Volley Shoot Challenge</Text>
+                  <Text style={styles.titleJa}>－ボレチャレ</Text>
+                  <Text style={styles.caption}>空中の一瞬を、足で撃ち抜け。</Text>
+                </View>
+              </ImageBackground>
             </View>
 
             <Text style={styles.description}>
-              飛んでくるボールを、足元のキックゾーンで叩き込む反応トレーニング。カメラモードでは実際のフォームに近い感覚で試せます。
+              飛んでくるボールを自由に足で捉える、ボレーシュート特化の反応トレーニング。カメラプレイでは足元トラッカーで空中ボールへの接触を判定します。
             </Text>
 
             <Text style={styles.sectionTitle}>難易度</Text>
@@ -427,7 +526,7 @@ export default function App() {
             </Pressable>
 
             <Pressable style={styles.cameraButton} onPress={() => setScreen("camera")}>
-              <Text style={styles.cameraButtonText}>カメラ診断</Text>
+              <Text style={styles.cameraButtonText}>カメラプレイ準備</Text>
             </Pressable>
           </ScrollView>
         )}
@@ -566,30 +665,34 @@ export default function App() {
                   <Text style={styles.cameraPlayHudText}>COMBO {stats.combo}</Text>
                 </View>
 
+                <View style={styles.volleyLane} />
                 <View
                   style={[
-                    styles.strikeZone,
+                    styles.footReachZone,
                     {
-                      left: strikeZone.x - strikeZone.good,
-                      top: strikeZone.y - strikeZone.good,
-                      width: strikeZone.good * 2,
-                      height: strikeZone.good * 2,
-                      borderRadius: strikeZone.good,
+                      left: footTracker.x - footReach.good,
+                      top: footTracker.y - footReach.good,
+                      width: footReach.good * 2,
+                      height: footReach.good * 2,
+                      borderRadius: footReach.good,
                     },
                   ]}
                 />
                 <View
                   style={[
-                    styles.perfectZone,
+                    styles.footMarker,
                     {
-                      left: strikeZone.x - strikeZone.perfect,
-                      top: strikeZone.y - strikeZone.perfect,
-                      width: strikeZone.perfect * 2,
-                      height: strikeZone.perfect * 2,
-                      borderRadius: strikeZone.perfect,
+                      left: footTracker.x - footReach.marker,
+                      top: footTracker.y - footReach.marker,
+                      width: footReach.marker * 2,
+                      height: footReach.marker * 1.18,
+                      borderRadius: footReach.marker,
+                      transform: [{ rotate: `${Math.max(-34, Math.min(34, footTracker.speed * 18))}deg` }],
                     },
                   ]}
-                />
+                >
+                  <Text style={styles.footMarkerText}>FOOT</Text>
+                </View>
 
                 {balls.map((ball) => (
                   <View
@@ -612,7 +715,9 @@ export default function App() {
                   </View>
                 ))}
 
-                <Text style={styles.cameraPlayMessage}>{message}</Text>
+                <Text style={styles.cameraPlayMessage}>
+                  {message} / {recognitionLabels[recognitionRange].label} x{bodyScale.toFixed(2)}
+                </Text>
 
                 <View style={styles.cameraPlayControls}>
                   <Pressable style={styles.cameraPlayMiniButton} onPress={() => setIsPaused((value) => !value)}>
@@ -632,6 +737,17 @@ export default function App() {
                   </View>
                 )}
               </Pressable>
+              <View
+                style={styles.footTouchLayer}
+                onTouchStart={(event) => {
+                  const touch = event.nativeEvent;
+                  registerFootPosition(touch.locationX, touch.locationY);
+                }}
+                onTouchMove={(event) => {
+                  const touch = event.nativeEvent;
+                  registerFootPosition(touch.locationX, touch.locationY);
+                }}
+              />
             </View>
           </View>
         )}
@@ -787,17 +903,17 @@ const styles = StyleSheet.create({
     backgroundColor: "#08111F",
   },
   homeContent: {
-    padding: 22,
-    gap: 16,
+    padding: 18,
+    gap: 14,
+    backgroundColor: "#030811",
   },
   hero: {
-    minHeight: 230,
-    paddingVertical: 20,
-    paddingHorizontal: 18,
+    minHeight: 288,
+    padding: 0,
     borderRadius: 8,
-    backgroundColor: "#07121F",
+    backgroundColor: "#030811",
     borderWidth: 1,
-    borderColor: "rgba(0, 217, 255, 0.42)",
+    borderColor: "rgba(0, 217, 255, 0.58)",
     overflow: "hidden",
     justifyContent: "flex-end",
   },
@@ -810,13 +926,13 @@ const styles = StyleSheet.create({
     left: 14,
     width: 170,
     height: 250,
-    backgroundColor: "rgba(0,217,255,0.11)",
+    backgroundColor: "rgba(0,217,255,0.18)",
     transform: [{ rotate: "28deg" }],
   },
   lightBeamRight: {
     left: undefined,
     right: 22,
-    backgroundColor: "rgba(71,209,108,0.1)",
+    backgroundColor: "rgba(145,255,0,0.13)",
     transform: [{ rotate: "-26deg" }],
   },
   heroAction: {
@@ -825,6 +941,37 @@ const styles = StyleSheet.create({
     right: 16,
     width: 250,
     height: 180,
+    opacity: 0.72,
+  },
+  heroImage: {
+    flex: 1,
+    minHeight: 288,
+    justifyContent: "flex-end",
+  },
+  heroImageAsset: {
+    opacity: 0.82,
+    transform: [{ scale: 1.08 }],
+  },
+  heroShade: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(2,6,16,0.32)",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(145,255,0,0.26)",
+  },
+  titlePlate: {
+    paddingHorizontal: 16,
+    paddingTop: 52,
+    paddingBottom: 18,
+    backgroundColor: "rgba(3,8,17,0.55)",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.16)",
+  },
+  titleKicker: {
+    color: "#A3FF12",
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0,
+    marginBottom: 5,
   },
   motionTrail: {
     position: "absolute",
@@ -882,8 +1029,15 @@ const styles = StyleSheet.create({
   },
   title: {
     color: "#FFFFFF",
-    fontSize: 42,
+    fontSize: 31,
     fontWeight: "900",
+    lineHeight: 34,
+  },
+  titleJa: {
+    color: "#00D9FF",
+    fontSize: 25,
+    fontWeight: "900",
+    lineHeight: 31,
   },
   subtitle: {
     color: "#00D9FF",
@@ -906,6 +1060,11 @@ const styles = StyleSheet.create({
     color: "#C9D6E2",
     fontSize: 15,
     lineHeight: 24,
+    backgroundColor: "rgba(255,255,255,0.045)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    borderRadius: 8,
+    padding: 14,
   },
   sectionTitle: {
     color: "#FFFFFF",
@@ -918,7 +1077,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 8,
     borderWidth: 1,
-    backgroundColor: "rgba(3,12,22,0.78)",
+    backgroundColor: "rgba(4,11,22,0.92)",
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -974,12 +1133,12 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 18,
     borderRadius: 8,
-    backgroundColor: "rgba(71,209,108,0.14)",
+    backgroundColor: "rgba(145,255,0,0.16)",
     borderWidth: 1,
-    borderColor: "rgba(71,209,108,0.36)",
+    borderColor: "rgba(145,255,0,0.42)",
   },
   cameraButtonText: {
-    color: "#47D16C",
+    color: "#A3FF12",
     fontSize: 16,
     fontWeight: "800",
   },
@@ -1258,6 +1417,7 @@ const styles = StyleSheet.create({
   cameraPlayOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.04)",
+    zIndex: 2,
   },
   cameraPlayHud: {
     position: "absolute",
@@ -1273,6 +1433,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(8,17,31,0.38)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.14)",
+    zIndex: 12,
   },
   cameraPlayHudText: {
     color: "#FFFFFF",
@@ -1292,6 +1453,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 8,
     backgroundColor: "rgba(8,17,31,0.36)",
+    zIndex: 12,
   },
   cameraPlayControls: {
     position: "absolute",
@@ -1301,6 +1463,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 7,
+    zIndex: 14,
   },
   cameraPlayMiniButton: {
     flex: 1,
@@ -1330,6 +1493,46 @@ const styles = StyleSheet.create({
   cameraPlayShotText: {
     color: "#08111F",
     fontSize: 19,
+    fontWeight: "900",
+  },
+  footTouchLayer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 46,
+    bottom: 58,
+    zIndex: 9,
+  },
+  volleyLane: {
+    position: "absolute",
+    left: "8%",
+    right: "8%",
+    top: "24%",
+    bottom: "18%",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(0,217,255,0.18)",
+    backgroundColor: "rgba(0,217,255,0.035)",
+  },
+  footReachZone: {
+    position: "absolute",
+    borderWidth: 2,
+    borderColor: "rgba(163,255,18,0.66)",
+    backgroundColor: "rgba(163,255,18,0.11)",
+    zIndex: 7,
+  },
+  footMarker: {
+    position: "absolute",
+    backgroundColor: "rgba(3,8,17,0.82)",
+    borderWidth: 2,
+    borderColor: "#A3FF12",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 8,
+  },
+  footMarkerText: {
+    color: "#A3FF12",
+    fontSize: 9,
     fontWeight: "900",
   },
   playRoot: {
