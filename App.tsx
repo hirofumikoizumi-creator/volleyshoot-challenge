@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import { OnDeviceVolleyCamera } from "./components/OnDeviceVolleyCamera";
 
 type Difficulty = "EASY" | "NORMAL" | "HARD";
 type Screen = "home" | "rules" | "play" | "result" | "camera" | "cameraPlay";
@@ -227,30 +228,35 @@ export default function App() {
     setFootTracker(next);
   }, [fieldSize, footTracker.ready]);
 
-  const startGame = (nextDifficulty: Difficulty) => {
+  const resetSession = (nextDifficulty: Difficulty, nextMessage: string) => {
     const nextConfig = configs[nextDifficulty];
     setDifficulty(nextDifficulty);
     setStats(initialStats);
     setBalls([]);
     setTimeLeft(nextConfig.timeLimit);
     setIsPaused(false);
-    setMessage("タイミングを合わせてシュート");
+    setMessage(nextMessage);
     setFootTracker(initialFootTracker);
     footTrackerRef.current = initialFootTracker;
     elapsedRef.current = 0;
     spawnElapsedRef.current = nextConfig.spawnMs;
     lastTickRef.current = Date.now();
     ballIdRef.current = 1;
-    setScreen("play");
   };
 
-  const startCameraGame = () => {
-    const nextConfig = configs[difficulty];
-    setStats(initialStats);
-    setBalls([]);
-    setTimeLeft(nextConfig.timeLimit);
-    setIsPaused(false);
-    setMessage("足をボールへ振り抜くと自動判定");
+  const startGame = async (nextDifficulty: Difficulty) => {
+    resetSession(nextDifficulty, "カメラに映る足をボールへ振り抜くと自動判定");
+    if (!cameraPermission?.granted && cameraPermission?.canAskAgain !== false) {
+      await requestCameraPermission();
+    }
+    setScreen("cameraPlay");
+  };
+
+  const startCameraGame = async () => {
+    resetSession(difficulty, "足をボールへ振り抜くと自動判定");
+    if (!cameraPermission?.granted && cameraPermission?.canAskAgain !== false) {
+      await requestCameraPermission();
+    }
     const nextFoot = {
       ...initialFootTracker,
       x: fieldSize.width > 0 ? fieldSize.width * 0.5 : initialFootTracker.x,
@@ -259,10 +265,6 @@ export default function App() {
     };
     footTrackerRef.current = nextFoot;
     setFootTracker(nextFoot);
-    elapsedRef.current = 0;
-    spawnElapsedRef.current = nextConfig.spawnMs;
-    lastTickRef.current = Date.now();
-    ballIdRef.current = 1;
     setScreen("cameraPlay");
   };
 
@@ -664,7 +666,11 @@ export default function App() {
                 setFieldSize({ width, height });
               }}
             >
-              <CameraView style={styles.cameraPlayPreview} facing="front" />
+              {fieldSize.width > 0 && fieldSize.height > 0 ? (
+                <OnDeviceVolleyCamera width={fieldSize.width} height={fieldSize.height} />
+              ) : (
+                <CameraView style={styles.cameraPlayPreview} facing="front" />
+              )}
               <Pressable style={styles.cameraPlayOverlay} onPress={shoot}>
                 <View style={styles.cameraPlayHud}>
                   <Text style={styles.cameraPlayHudText}>SCORE {stats.score}</Text>

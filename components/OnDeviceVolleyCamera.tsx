@@ -12,9 +12,10 @@ type OnDeviceVolleyCameraProps = {
   height: number;
   modelAsset?: number;
   latestPose?: PoseFrame;
+  showStatusBadge?: boolean;
 };
 
-export function OnDeviceVolleyCamera({ width, height, modelAsset, latestPose }: OnDeviceVolleyCameraProps) {
+export function OnDeviceVolleyCamera({ width, height, modelAsset, latestPose, showStatusBadge = false }: OnDeviceVolleyCameraProps) {
   const device = useCameraDevice("front");
   const { hasPermission, requestPermission } = useCameraPermission();
   const [modelLoaded, setModelLoaded] = useState(false);
@@ -90,15 +91,17 @@ export function OnDeviceVolleyCamera({ width, height, modelAsset, latestPose }: 
         frameProcessor={frameProcessor}
       />
       {debugOverlayEnabled && <FootDebugOverlay width={width} height={height} pose={latestPose} />}
-      <View style={styles.badge}>
-        <Text style={styles.badgeText}>ON-DEVICE AI</Text>
-        <Text style={styles.badgeSubText}>
-          {modelLoaded ? `BlazePose Lite / ${Math.round(inferenceFps)}fps` : modelError ?? "Loading model"}
-        </Text>
-        <Text style={styles.badgeSubText}>
-          frames off-device: {privacy.cameraFramesLeaveDevice ? "yes" : "no"}
-        </Text>
-      </View>
+      {showStatusBadge && (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>ON-DEVICE AI</Text>
+          <Text style={styles.badgeSubText}>
+            {modelLoaded ? `BlazePose Lite / ${Math.round(inferenceFps)}fps` : modelError ?? "Loading model"}
+          </Text>
+          <Text style={styles.badgeSubText}>
+            frames off-device: {privacy.cameraFramesLeaveDevice ? "yes" : "no"}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
