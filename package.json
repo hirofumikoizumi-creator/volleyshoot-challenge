@@ -69,6 +69,7 @@
     "react-native-worklets-core": "^1.6.3",
     "superjson": "^1.13.3",
     "tailwind-merge": "^2.6.0",
+    "vision-camera-resize-plugin": "3.2.0",
     "zod": "^4.2.1",
     "zustand": "^5.0.14"
   },

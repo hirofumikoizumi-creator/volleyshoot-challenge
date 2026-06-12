@@ -128,6 +128,7 @@ const initialFootTracker: FootTracker = {
   ready: false,
   lastTs: 0,
 };
+const blazePoseLiteModel = require("./assets/models/blazepose_lite.tflite");
 
 function randomBetween(min: number, max: number) {
   return min + Math.random() * (max - min);
@@ -667,7 +668,12 @@ export default function App() {
               }}
             >
               {fieldSize.width > 0 && fieldSize.height > 0 ? (
-                <OnDeviceVolleyCamera width={fieldSize.width} height={fieldSize.height} />
+                <OnDeviceVolleyCamera
+                  width={fieldSize.width}
+                  height={fieldSize.height}
+                  modelAsset={blazePoseLiteModel}
+                  onFootDetected={(point) => registerFootPosition(point.x, point.y)}
+                />
               ) : (
                 <CameraView style={styles.cameraPlayPreview} facing="front" />
               )}

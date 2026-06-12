@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Camera, useCameraDevice, useCameraPermission, useFrameProcessor } from "react-native-vision-camera";
-import { loadTensorflowModel } from "react-native-fast-tflite";
+import { useTensorflowModel } from "react-native-fast-tflite";
+import { useRunOnJS } from "react-native-worklets-core";
+import { useResizePlugin } from "vision-camera-resize-plugin";
 import type { PoseFrame } from "@/lib/pose/blazepose-types";
 import { assertNoNetworkFrameTransport } from "@/lib/pose/on-device-pipeline";
 import { usePosePipelineStore } from "@/lib/pose/pose-store";
@@ -13,42 +15,91 @@ type OnDeviceVolleyCameraProps = {
   modelAsset?: number;
   latestPose?: PoseFrame;
   showStatusBadge?: boolean;
+  onFootDetected?: (point: { x: number; y: number; confidence: number }) => void;
 };
 
-export function OnDeviceVolleyCamera({ width, height, modelAsset, latestPose, showStatusBadge = false }: OnDeviceVolleyCameraProps) {
+const MODEL_INPUT_SIZE = 256;
+const LANDMARK_STRIDE = 5;
+const LEFT_ANKLE = 27;
+const RIGHT_ANKLE = 28;
+const LEFT_HEEL = 29;
+const RIGHT_HEEL = 30;
+const LEFT_FOOT_INDEX = 31;
+const RIGHT_FOOT_INDEX = 32;
+
+function normalizedLandmarkValue(value: number) {
+  "worklet";
+  if (!Number.isFinite(value)) return 0;
+  if (value > 2 || value < -1) return value / MODEL_INPUT_SIZE;
+  return value;
+}
+
+function readLandmark(values: Float32Array, index: number) {
+  "worklet";
+  const offset = index * LANDMARK_STRIDE;
+  if (offset + 3 >= values.length) return undefined;
+  return {
+    x: normalizedLandmarkValue(values[offset] ?? 0),
+    y: normalizedLandmarkValue(values[offset + 1] ?? 0),
+    visibility: Math.max(0, Math.min(1, values[offset + 3] ?? values[offset + 4] ?? 0)),
+  };
+}
+
+function contactFromSide(values: Float32Array, ankleIndex: number, heelIndex: number, footIndex: number) {
+  "worklet";
+  const ankle = readLandmark(values, ankleIndex);
+  const heel = readLandmark(values, heelIndex);
+  const toe = readLandmark(values, footIndex);
+  if (!ankle || !heel || !toe) return undefined;
+  const confidence = Math.min(ankle.visibility, heel.visibility, toe.visibility);
+  return {
+    x: ankle.x * 0.35 + toe.x * 0.65,
+    y: ankle.y * 0.35 + toe.y * 0.65,
+    confidence,
+  };
+}
+
+export function OnDeviceVolleyCamera({
+  width,
+  height,
+  modelAsset,
+  latestPose,
+  showStatusBadge = false,
+  onFootDetected,
+}: OnDeviceVolleyCameraProps) {
   const device = useCameraDevice("front");
   const { hasPermission, requestPermission } = useCameraPermission();
-  const [modelLoaded, setModelLoaded] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
   const { debugOverlayEnabled, inferenceFps, setModelReady } = usePosePipelineStore();
+  const modelState = useTensorflowModel(modelAsset ?? 0, []);
+  const model = modelState.state === "loaded" ? modelState.model : undefined;
+  const { resize } = useResizePlugin();
+  const reportFoot = useRunOnJS((x: number, y: number, confidence: number) => {
+    onFootDetected?.({ x, y, confidence });
+  }, [onFootDetected]);
 
   useEffect(() => {
-    let mounted = true;
-    setModelLoaded(false);
-    setModelReady(false);
     setModelError(null);
 
     if (!modelAsset) {
       setModelError("BlazePose Lite model asset is not configured yet.");
+      setModelReady(false);
       return;
     }
 
-    loadTensorflowModel(modelAsset, ["core-ml"])
-      .then(() => {
-        if (!mounted) return;
-        setModelLoaded(true);
-        setModelReady(true);
-      })
-      .catch((error: unknown) => {
-        if (!mounted) return;
-        setModelError(error instanceof Error ? error.message : "Failed to load BlazePose Lite model.");
-        setModelReady(false);
-      });
+    if (modelState.state === "loaded") {
+      setModelReady(true);
+      return;
+    }
 
-    return () => {
-      mounted = false;
-    };
-  }, [modelAsset, setModelReady]);
+    if (modelState.state === "error") {
+      setModelError(modelState.error.message);
+      setModelReady(false);
+      return;
+    }
+
+    setModelReady(false);
+  }, [modelAsset, modelState, setModelReady]);
 
   useEffect(() => {
     if (!hasPermission) {
@@ -60,10 +111,28 @@ export function OnDeviceVolleyCamera({ width, height, modelAsset, latestPose, sh
 
   const frameProcessor = useFrameProcessor((frame) => {
     "worklet";
-    // The production path runs BlazePose Lite here once the bundled .tflite asset
-    // is present. Camera frames remain on-device and are never uploaded.
-    void frame;
-  }, []);
+    if (model == null) return;
+
+    const input = resize(frame, {
+      scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
+      mirror: true,
+      pixelFormat: "rgb",
+      dataType: "float32",
+    });
+
+    const outputs = model.runSync([input.buffer as ArrayBuffer]);
+    const landmarkBuffer = outputs.find((output) => output.byteLength >= 33 * LANDMARK_STRIDE * 4);
+    if (landmarkBuffer == null) return;
+
+    const landmarks = new Float32Array(landmarkBuffer);
+    const leftFoot = contactFromSide(landmarks, LEFT_ANKLE, LEFT_HEEL, LEFT_FOOT_INDEX);
+    const rightFoot = contactFromSide(landmarks, RIGHT_ANKLE, RIGHT_HEEL, RIGHT_FOOT_INDEX);
+    const bestFoot =
+      (leftFoot?.confidence ?? 0) >= (rightFoot?.confidence ?? 0) ? leftFoot : rightFoot;
+
+    if (!bestFoot || bestFoot.confidence < 0.6) return;
+    reportFoot(bestFoot.x * width, bestFoot.y * height, bestFoot.confidence);
+  }, [model, reportFoot, resize, width, height]);
 
   if (!hasPermission) {
     return (
@@ -95,7 +164,7 @@ export function OnDeviceVolleyCamera({ width, height, modelAsset, latestPose, sh
         <View style={styles.badge}>
           <Text style={styles.badgeText}>ON-DEVICE AI</Text>
           <Text style={styles.badgeSubText}>
-            {modelLoaded ? `BlazePose Lite / ${Math.round(inferenceFps)}fps` : modelError ?? "Loading model"}
+            {model ? `BlazePose Lite / ${Math.round(inferenceFps)}fps` : modelError ?? "Loading model"}
           </Text>
           <Text style={styles.badgeSubText}>
             frames off-device: {privacy.cameraFramesLeaveDevice ? "yes" : "no"}
