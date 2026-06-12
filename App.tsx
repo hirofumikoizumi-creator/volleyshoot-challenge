@@ -27,6 +27,7 @@ type Ball = {
   radius: number;
   type: BallType;
   spin: number;
+  targetTimeMs: number;
 };
 
 type FootTracker = {
@@ -143,6 +144,9 @@ const initialFootInputStatus: FootInputStatus = {
   lastDetectedAt: 0,
 };
 const blazePoseLiteModel = require("./assets/models/blazepose_lite.tflite");
+const AUTO_KICK_SPEED_THRESHOLD = 0.62;
+const AUTO_KICK_COOLDOWN_MS = 220;
+const AUTO_KICK_DISTANCE_BUFFER = 1.18;
 
 function randomBetween(min: number, max: number) {
   return min + Math.random() * (max - min);
@@ -231,6 +235,10 @@ export default function App() {
   }, [fieldSize]);
 
   const accuracy = stats.shots === 0 ? 0 : Math.round((stats.hits / stats.shots) * 100);
+  const footBallDistance = footTracker.ready ? nearestBallDistance(footTracker) : Infinity;
+  const isFootNearBall = Number.isFinite(footBallDistance) && footBallDistance <= footReach.good * AUTO_KICK_DISTANCE_BUFFER;
+  const footInputLabel = footInputStatus.source === "AI" ? "AUTO" : "TOUCH";
+  const aiStatusLabel = footInputStatus.aiReady ? "AI FOOT" : "AI LOADING";
 
   useEffect(() => {
     if (fieldSize.width <= 0 || fieldSize.height <= 0 || footTracker.ready) return;
@@ -307,6 +315,7 @@ export default function App() {
     const framesToTarget = Math.max(32, Math.abs(distanceX) / speed);
     const vx = distanceX / framesToTarget;
     const vy = (targetY - startY - config.gravity * framesToTarget * framesToTarget * 0.5) / framesToTarget;
+    const targetTimeMs = Date.now() + framesToTarget * 16.67;
 
     const type = pickBallType(config);
     const baseRadius = type === "GOLD" ? 18 : 16;
@@ -322,6 +331,7 @@ export default function App() {
         radius: Math.round(baseRadius * bodyScale),
         type,
         spin: randomBetween(-5, 5),
+        targetTimeMs,
       },
     ]);
   };
@@ -392,6 +402,19 @@ export default function App() {
 
     return () => clearInterval(timer);
   }, [config, fieldSize, isPaused, screen]);
+
+  function nearestBallDistance(anchor: { x: number; y: number }) {
+    if (balls.length === 0) return Infinity;
+    return Math.min(
+      ...balls.map((ball) => Math.max(0, Math.hypot(ball.x - anchor.x, ball.y - anchor.y) - ball.radius)),
+    );
+  }
+
+  const hasVolleyCandidate = (anchor: { x: number; y: number }, reach: number) =>
+    balls.some((ball) => {
+      const distance = Math.max(0, Math.hypot(ball.x - anchor.x, ball.y - anchor.y) - ball.radius);
+      return distance <= reach * AUTO_KICK_DISTANCE_BUFFER;
+    });
 
   const shootAt = (anchor: { x: number; y: number }, goodReach: number, perfectReach: number, source: "button" | "foot") => {
     if ((screen !== "play" && screen !== "cameraPlay") || isPaused) return;
@@ -479,7 +502,12 @@ export default function App() {
       error: source === "AI" ? undefined : current.error,
     }));
 
-    if (screen === "cameraPlay" && speed > 0.72 && now - lastAutoKickRef.current > 220) {
+    if (
+      screen === "cameraPlay" &&
+      speed > AUTO_KICK_SPEED_THRESHOLD &&
+      now - lastAutoKickRef.current > AUTO_KICK_COOLDOWN_MS &&
+      hasVolleyCandidate(next, footReach.good)
+    ) {
       lastAutoKickRef.current = now;
       shootAt(next, footReach.good, footReach.perfect, "foot");
     }
@@ -721,11 +749,9 @@ export default function App() {
                 </View>
                 <View style={styles.aiStatusPill}>
                   <Text style={styles.aiStatusText}>
-                    {footInputStatus.aiReady ? "AI FOOT" : "AI LOADING"} {Math.round(footInputStatus.confidence * 100)}%
+                    {aiStatusLabel} {Math.round(footInputStatus.confidence * 100)}%
                   </Text>
-                  <Text style={styles.aiStatusSubText}>
-                    {footInputStatus.source === "AI" ? "AUTO" : "TOUCH BACKUP"}
-                  </Text>
+                  <Text style={styles.aiStatusSubText}>{footInputLabel} / {isFootNearBall ? "BALL IN" : "TRACKING"}</Text>
                 </View>
 
                 <View style={styles.volleyLane} />
@@ -754,7 +780,7 @@ export default function App() {
                     },
                   ]}
                 >
-                  <Text style={styles.footMarkerText}>FOOT</Text>
+                  <Text style={styles.footMarkerText}>{footInputStatus.source === "AI" ? "AI" : "TOUCH"}</Text>
                 </View>
 
                 {balls.map((ball) => (
@@ -780,6 +806,7 @@ export default function App() {
 
                 <Text style={styles.cameraPlayMessage}>
                   {message} / {recognitionLabels[recognitionRange].label} x{bodyScale.toFixed(2)}
+                  {isFootNearBall ? " / HIT RANGE" : ""}
                 </Text>
 
                 <View style={styles.cameraPlayControls}>
