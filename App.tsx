@@ -237,6 +237,8 @@ export default function App() {
   const accuracy = stats.shots === 0 ? 0 : Math.round((stats.hits / stats.shots) * 100);
   const footBallDistance = footTracker.ready ? nearestBallDistance(footTracker) : Infinity;
   const isFootNearBall = Number.isFinite(footBallDistance) && footBallDistance <= footReach.good * AUTO_KICK_DISTANCE_BUFFER;
+  const swingReadiness = Math.min(100, Math.round((footTracker.speed / AUTO_KICK_SPEED_THRESHOLD) * 100));
+  const footDistanceLabel = Number.isFinite(footBallDistance) ? `${Math.round(footBallDistance)}px` : "--";
   const footInputLabel = footInputStatus.source === "AI" ? "AUTO" : "TOUCH";
   const aiStatusLabel = footInputStatus.aiReady ? "AI FOOT" : "AI LOADING";
 
@@ -752,6 +754,20 @@ export default function App() {
                     {aiStatusLabel} {Math.round(footInputStatus.confidence * 100)}%
                   </Text>
                   <Text style={styles.aiStatusSubText}>{footInputLabel} / {isFootNearBall ? "BALL IN" : "TRACKING"}</Text>
+                </View>
+                <View style={styles.volleyTuningPanel}>
+                  <View style={styles.tuningRow}>
+                    <Text style={styles.tuningLabel}>SWING</Text>
+                    <Text style={[styles.tuningValue, swingReadiness >= 100 && styles.tuningValueReady]}>
+                      {swingReadiness}%
+                    </Text>
+                  </View>
+                  <View style={styles.tuningRow}>
+                    <Text style={styles.tuningLabel}>BALL</Text>
+                    <Text style={[styles.tuningValue, isFootNearBall && styles.tuningValueReady]}>
+                      {footDistanceLabel}
+                    </Text>
+                  </View>
                 </View>
 
                 <View style={styles.volleyLane} />
@@ -1607,6 +1623,39 @@ const styles = StyleSheet.create({
     fontSize: 8,
     fontWeight: "900",
     marginTop: 2,
+  },
+  volleyTuningPanel: {
+    position: "absolute",
+    top: 92,
+    right: 8,
+    minWidth: 104,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: "rgba(8,17,31,0.32)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    zIndex: 12,
+    gap: 4,
+  },
+  tuningRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  tuningLabel: {
+    color: "rgba(220,231,243,0.74)",
+    fontSize: 8,
+    fontWeight: "900",
+  },
+  tuningValue: {
+    color: "#94A3B8",
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  tuningValueReady: {
+    color: "#A3FF12",
   },
   cameraPlayMessage: {
     position: "absolute",
