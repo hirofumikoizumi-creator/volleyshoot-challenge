@@ -108,6 +108,12 @@ const config: ExpoConfig = {
         },
       },
     ],
+    [
+      "react-native-fast-tflite",
+      {
+        enableCoreMLDelegate: true,
+      },
+    ],
   ],
   experiments: {
     typedRoutes: true,
