@@ -23,7 +23,7 @@
     "@react-navigation/bottom-tabs": "^7.8.12",
     "@react-navigation/elements": "^2.9.2",
     "@react-navigation/native": "^7.1.25",
-    "@shopify/react-native-skia": "^2.6.4",
+    "@shopify/react-native-skia": "^2.2.12",
     "@tanstack/react-query": "^5.90.12",
     "@trpc/client": "11.7.2",
     "@trpc/react-query": "11.7.2",
@@ -38,7 +38,7 @@
     "expo-build-properties": "^1.0.10",
     "expo-camera": "^17.0.10",
     "expo-constants": "~18.0.13",
-    "expo-dev-client": "^56.0.20",
+    "expo-dev-client": "^6.0.21",
     "expo-haptics": "~15.0.8",
     "expo-image": "~3.0.11",
     "expo-keep-awake": "~15.0.8",
@@ -64,10 +64,10 @@
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.16.0",
     "react-native-svg": "15.12.1",
-    "react-native-web": "~0.21.2",
     "react-native-vision-camera": "^5.0.11",
-    "react-native-worklets-core": "^1.6.3",
+    "react-native-web": "~0.21.2",
     "react-native-worklets": "0.5.1",
+    "react-native-worklets-core": "^1.6.3",
     "superjson": "^1.13.3",
     "tailwind-merge": "^2.6.0",
     "zod": "^4.2.1",
@@ -103,7 +103,8 @@
     "doctor": {
       "reactNativeDirectoryCheck": {
         "exclude": [
-          "react-native-nitro-image"
+          "react-native-nitro-image",
+          "react-native-fast-tflite"
         ]
       }
     }
