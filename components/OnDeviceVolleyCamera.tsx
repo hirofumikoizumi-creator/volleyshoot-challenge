@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { Camera, useCameraDevice, useCameraPermission, useFrameOutput } from "react-native-vision-camera";
+import { Camera, useCameraDevice, useCameraPermission, useFrameProcessor } from "react-native-vision-camera";
 import { loadTensorflowModel } from "react-native-fast-tflite";
 import type { PoseFrame } from "@/lib/pose/blazepose-types";
 import { assertNoNetworkFrameTransport } from "@/lib/pose/on-device-pipeline";
@@ -57,16 +57,12 @@ export function OnDeviceVolleyCamera({ width, height, modelAsset, latestPose }: 
 
   const privacy = useMemo(() => assertNoNetworkFrameTransport(), []);
 
-  const frameOutput = useFrameOutput({
-    targetResolution: { width: 256, height: 256 },
-    enablePreviewSizedOutputBuffers: true,
-    onFrame(frame) {
-      "worklet";
-      // The production path runs BlazePose Lite here once the bundled .tflite asset
-      // is present. Camera frames remain on-device and are never uploaded.
-      frame.dispose();
-    },
-  });
+  const frameProcessor = useFrameProcessor((frame) => {
+    "worklet";
+    // The production path runs BlazePose Lite here once the bundled .tflite asset
+    // is present. Camera frames remain on-device and are never uploaded.
+    void frame;
+  }, []);
 
   if (!hasPermission) {
     return (
@@ -91,7 +87,7 @@ export function OnDeviceVolleyCamera({ width, height, modelAsset, latestPose }: 
         device={device}
         isActive
         resizeMode="cover"
-        outputs={[frameOutput]}
+        frameProcessor={frameProcessor}
       />
       {debugOverlayEnabled && <FootDebugOverlay width={width} height={height} pose={latestPose} />}
       <View style={styles.badge}>
