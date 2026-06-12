@@ -483,8 +483,8 @@ export default function App() {
                 <View style={styles.heroShade} />
                 <View style={styles.titlePlate}>
                   <Text style={styles.titleKicker}>REAL CAMERA FOOTBALL</Text>
-                  <Text style={styles.title}>Volley Shoot Challenge</Text>
-                  <Text style={styles.titleJa}>－ボレチャレ</Text>
+                  <Text style={styles.titleJa}>ボレーシュートチャレンジ</Text>
+                  <Text style={styles.title}>－Volley Shoot Challenge－</Text>
                   <Text style={styles.caption}>空中の一瞬を、足で撃ち抜け。</Text>
                 </View>
               </ImageBackground>
@@ -494,7 +494,7 @@ export default function App() {
               飛んでくるボールを自由に足で捉える、ボレーシュート特化の反応トレーニング。カメラプレイでは足元トラッカーで空中ボールへの接触を判定します。
             </Text>
 
-            <Text style={styles.sectionTitle}>難易度</Text>
+            <Text style={styles.sectionTitle}>TRAINING MODE</Text>
             {(["EASY", "NORMAL", "HARD"] as Difficulty[]).map((item) => (
               <Pressable
                 key={item}
@@ -505,19 +505,28 @@ export default function App() {
                 ]}
                 onPress={() => startGame(item)}
               >
-                <View>
+                <View style={styles.difficultyGlow} />
+                <View style={styles.difficultyIcon}>
+                  <Text style={styles.difficultyIconText}>
+                    {item === "EASY" ? "1" : item === "NORMAL" ? "2" : "3"}
+                  </Text>
+                </View>
+                <View style={styles.difficultyCopy}>
                   <Text style={styles.difficultyText}>{configs[item].label}</Text>
                   <Text style={styles.difficultyHint}>
                     {item === "EASY"
-                      ? "ゆっくり狙える入門モード"
+                      ? "フォーム確認と初回トレーニング"
                       : item === "NORMAL"
-                        ? "標準スピードの実戦モード"
-                        : "反応速度を試す高負荷モード"}
+                        ? "実戦テンポのボレー反応"
+                        : "高速クロスへの一撃勝負"}
                   </Text>
                 </View>
-                <Text style={[styles.difficultyMeta, { color: configs[item].accent }]}>
-                  {configs[item].timeLimit}s
-                </Text>
+                <View style={styles.difficultyMetaPanel}>
+                  <Text style={[styles.difficultyMeta, { color: configs[item].accent }]}>
+                    {configs[item].timeLimit}s
+                  </Text>
+                  <Text style={styles.difficultyMetaLabel}>SESSION</Text>
+                </View>
               </Pressable>
             ))}
 
@@ -959,10 +968,11 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(145,255,0,0.26)",
   },
   titlePlate: {
+    alignItems: "center",
     paddingHorizontal: 16,
-    paddingTop: 52,
-    paddingBottom: 18,
-    backgroundColor: "rgba(3,8,17,0.55)",
+    paddingTop: 42,
+    paddingBottom: 20,
+    backgroundColor: "rgba(3,8,17,0.62)",
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.16)",
   },
@@ -972,6 +982,7 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: 0,
     marginBottom: 5,
+    textAlign: "center",
   },
   motionTrail: {
     position: "absolute",
@@ -1029,15 +1040,17 @@ const styles = StyleSheet.create({
   },
   title: {
     color: "#FFFFFF",
-    fontSize: 31,
-    fontWeight: "900",
-    lineHeight: 34,
-  },
-  titleJa: {
-    color: "#00D9FF",
     fontSize: 25,
     fontWeight: "900",
     lineHeight: 31,
+    textAlign: "center",
+  },
+  titleJa: {
+    color: "#00D9FF",
+    fontSize: 29,
+    fontWeight: "900",
+    lineHeight: 36,
+    textAlign: "center",
   },
   subtitle: {
     color: "#00D9FF",
@@ -1050,6 +1063,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     marginTop: 8,
+    textAlign: "center",
   },
   titleSmall: {
     color: "#FFFFFF",
@@ -1067,28 +1081,58 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   sectionTitle: {
-    color: "#FFFFFF",
-    fontSize: 18,
-    fontWeight: "700",
+    color: "#A3FF12",
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 0,
     marginTop: 8,
+    textAlign: "center",
   },
   difficultyButton: {
-    minHeight: 78,
-    padding: 16,
+    minHeight: 86,
+    padding: 14,
     borderRadius: 8,
     borderWidth: 1,
-    backgroundColor: "rgba(4,11,22,0.92)",
+    backgroundColor: "rgba(2,8,18,0.96)",
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     gap: 12,
+    overflow: "hidden",
+  },
+  difficultyGlow: {
+    position: "absolute",
+    top: -28,
+    right: -16,
+    width: 132,
+    height: 132,
+    borderRadius: 66,
+    backgroundColor: "rgba(0,217,255,0.12)",
+  },
+  difficultyIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(163,255,18,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(163,255,18,0.42)",
+  },
+  difficultyIconText: {
+    color: "#A3FF12",
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  difficultyCopy: {
+    flex: 1,
   },
   pressed: {
     opacity: 0.72,
   },
   difficultyText: {
     color: "#FFFFFF",
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: "800",
   },
   difficultyHint: {
@@ -1096,9 +1140,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 6,
   },
+  difficultyMetaPanel: {
+    minWidth: 66,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
   difficultyMeta: {
     fontSize: 20,
     fontWeight: "900",
+  },
+  difficultyMetaLabel: {
+    color: "#94A3B8",
+    fontSize: 9,
+    fontWeight: "900",
+    marginTop: 2,
   },
   primaryButton: {
     alignItems: "center",
