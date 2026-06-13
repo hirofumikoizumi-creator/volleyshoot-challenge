@@ -5,125 +5,65 @@ import { Camera, runAtTargetFps, useCameraDevice, useCameraPermission, useFrameP
 import { useTensorflowModel } from "react-native-fast-tflite";
 import { useRunOnJS } from "react-native-worklets-core";
 import { useResizePlugin } from "vision-camera-resize-plugin";
-import type { PoseFrame } from "@/lib/pose/blazepose-types";
 import { assertNoNetworkFrameTransport } from "@/lib/pose/on-device-pipeline";
 import { usePosePipelineStore } from "@/lib/pose/pose-store";
-import { FootDebugOverlay } from "./FootDebugOverlay";
 
 type OnDeviceVolleyCameraProps = {
   width: number;
   height: number;
   modelAsset?: number;
-  latestPose?: PoseFrame;
   showStatusBadge?: boolean;
   onFootDetected?: (point: { x: number; y: number; confidence: number }) => void;
   onInferenceStatus?: (status: { ready: boolean; confidence: number; error?: string }) => void;
 };
 
-const MODEL_INPUT_SIZE = 256;
-const LANDMARK_STRIDE = 5;
-const LEFT_ANKLE = 27;
-const RIGHT_ANKLE = 28;
-const LEFT_HEEL = 29;
-const RIGHT_HEEL = 30;
-const LEFT_FOOT_INDEX = 31;
-const RIGHT_FOOT_INDEX = 32;
-
-type ModelTensorDataType =
-  | "string"
-  | "float16"
-  | "float32"
-  | "float64"
-  | "bfloat16"
-  | "int4"
-  | "int8"
-  | "int16"
-  | "int32"
-  | "int64"
-  | "uint8"
-  | "uint16"
-  | "uint32"
-  | "uint64"
-  | "bool"
-  | "complex64"
-  | "complex128"
-  | "resource"
-  | "variant"
-  | "none";
-
-function tensorDataTypeBytes(dataType: ModelTensorDataType) {
-  switch (dataType) {
-    case "float16":
-    case "bfloat16":
-    case "int16":
-    case "uint16":
-      return 2;
-    case "float32":
-    case "int32":
-    case "uint32":
-      return 4;
-    case "float64":
-    case "int64":
-    case "uint64":
-      return 8;
-    case "int4":
-      return 0.5;
-    case "int8":
-    case "uint8":
-    case "bool":
-      return 1;
-    default:
-      return 0;
-  }
-}
+const DEFAULT_INPUT_SIZE = 192;
+const LEFT_ANKLE = 15;
+const RIGHT_ANKLE = 16;
+const MOVENET_KEYPOINT_VALUES = 17 * 3;
 
 function tensorElementCount(shape: number[]) {
   return shape.reduce((total, value) => total * Math.max(1, Math.round(value)), 1);
 }
 
 function inferSquareInputSize(shape: number[]) {
-  const imageDimensions = shape.map((value) => Math.round(value)).filter((value) => value >= 32);
-  if (imageDimensions.length < 2) return MODEL_INPUT_SIZE;
-  return Math.min(imageDimensions[0] ?? MODEL_INPUT_SIZE, imageDimensions[1] ?? MODEL_INPUT_SIZE);
+  const dimensions = shape.map((value) => Math.round(value)).filter((value) => value >= 32);
+  if (dimensions.length < 2) return DEFAULT_INPUT_SIZE;
+  return Math.min(dimensions[0] ?? DEFAULT_INPUT_SIZE, dimensions[1] ?? DEFAULT_INPUT_SIZE);
 }
 
-function normalizedLandmarkValue(value: number) {
+function readFloatKeypoint(values: Float32Array, index: number) {
+  "worklet";
+  const offset = index * 3;
+  if (offset + 2 >= values.length) return undefined;
+  return {
+    y: values[offset] ?? 0,
+    x: values[offset + 1] ?? 0,
+    score: values[offset + 2] ?? 0,
+  };
+}
+
+function readByteKeypoint(values: Uint8Array, index: number) {
+  "worklet";
+  const offset = index * 3;
+  if (offset + 2 >= values.length) return undefined;
+  return {
+    y: (values[offset] ?? 0) / 255,
+    x: (values[offset + 1] ?? 0) / 255,
+    score: (values[offset + 2] ?? 0) / 255,
+  };
+}
+
+function clamp01(value: number) {
   "worklet";
   if (!Number.isFinite(value)) return 0;
-  if (value > 2 || value < -1) return value / MODEL_INPUT_SIZE;
-  return value;
-}
-
-function readLandmark(values: Float32Array, index: number) {
-  "worklet";
-  const offset = index * LANDMARK_STRIDE;
-  if (offset + 3 >= values.length) return undefined;
-  return {
-    x: normalizedLandmarkValue(values[offset] ?? 0),
-    y: normalizedLandmarkValue(values[offset + 1] ?? 0),
-    visibility: Math.max(0, Math.min(1, values[offset + 3] ?? values[offset + 4] ?? 0)),
-  };
-}
-
-function contactFromSide(values: Float32Array, ankleIndex: number, heelIndex: number, footIndex: number) {
-  "worklet";
-  const ankle = readLandmark(values, ankleIndex);
-  const heel = readLandmark(values, heelIndex);
-  const toe = readLandmark(values, footIndex);
-  if (!ankle || !heel || !toe) return undefined;
-  const confidence = Math.min(ankle.visibility, heel.visibility, toe.visibility);
-  return {
-    x: ankle.x * 0.35 + toe.x * 0.65,
-    y: ankle.y * 0.35 + toe.y * 0.65,
-    confidence,
-  };
+  return Math.max(0, Math.min(1, value));
 }
 
 export function OnDeviceVolleyCamera({
   width,
   height,
   modelAsset,
-  latestPose,
   showStatusBadge = false,
   onFootDetected,
   onInferenceStatus,
@@ -131,42 +71,27 @@ export function OnDeviceVolleyCamera({
   const device = useCameraDevice("front");
   const { hasPermission, requestPermission } = useCameraPermission();
   const [modelError, setModelError] = useState<string | null>(null);
-  const { debugOverlayEnabled, inferenceFps, setModelReady } = usePosePipelineStore();
+  const { inferenceFps, setModelReady } = usePosePipelineStore();
   const modelState = useTensorflowModel(modelAsset ?? 0, []);
   const model = modelState.state === "loaded" ? modelState.model : undefined;
   const boxedModel = useMemo(() => (model ? NitroModules.box(model) : undefined), [model]);
   const inputMetadata = useMemo(() => {
     const inputTensor = model?.inputs[0];
-    if (!inputTensor) {
-      return {
-        expectedBytes: 0,
-        inputSize: MODEL_INPUT_SIZE,
-        resizeDataType: "uint8" as const,
-        label: "input: unknown",
-      };
-    }
-
-    const bytesPerValue = tensorDataTypeBytes(inputTensor.dataType);
-    const expectedBytes = Math.round(tensorElementCount(inputTensor.shape) * bytesPerValue);
-    const resizeDataType: "float32" | "uint8" = inputTensor.dataType === "float32" ? "float32" : "uint8";
-
+    const inputSize = inputTensor ? inferSquareInputSize(inputTensor.shape) : DEFAULT_INPUT_SIZE;
+    const expectedBytes = inputSize * inputSize * 3;
     return {
+      inputSize,
       expectedBytes,
-      inputSize: inferSquareInputSize(inputTensor.shape),
-      resizeDataType,
-      label: `${inputTensor.dataType} ${inputTensor.shape.join("x")} / ${expectedBytes}b`,
+      label: inputTensor ? `${inputTensor.dataType} ${inputTensor.shape.join("x")}` : "MoveNet uint8 input",
     };
   }, [model]);
-  const landmarkOutputIndex = useMemo(() => {
-    const outputs = model?.outputs ?? [];
-    const exactIndex = outputs.findIndex(
-      (output) => output.dataType === "float32" && tensorElementCount(output.shape) === 33 * LANDMARK_STRIDE,
-    );
-    if (exactIndex >= 0) return exactIndex;
-
-    return outputs.findIndex(
-      (output) => output.dataType === "float32" && tensorElementCount(output.shape) >= 33 * LANDMARK_STRIDE,
-    );
+  const outputMetadata = useMemo(() => {
+    const outputTensor = model?.outputs.find((output) => tensorElementCount(output.shape) >= MOVENET_KEYPOINT_VALUES);
+    return {
+      index: outputTensor ? model?.outputs.indexOf(outputTensor) ?? 0 : 0,
+      dataType: outputTensor?.dataType ?? "float32",
+      label: outputTensor ? `${outputTensor.dataType} ${outputTensor.shape.join("x")}` : "output: unknown",
+    };
   }, [model]);
   const { resize } = useResizePlugin();
   const reportFoot = useRunOnJS((x: number, y: number, confidence: number) => {
@@ -180,7 +105,7 @@ export function OnDeviceVolleyCamera({
     setModelError(null);
 
     if (!modelAsset) {
-      setModelError("BlazePose Lite model asset is not configured yet.");
+      setModelError("MoveNet model asset is not configured yet.");
       setModelReady(false);
       onInferenceStatus?.({ ready: false, confidence: 0, error: "model-missing" });
       return;
@@ -214,66 +139,70 @@ export function OnDeviceVolleyCamera({
     "worklet";
     if (boxedModel == null) return;
 
-    runAtTargetFps(15, () => {
+    runAtTargetFps(12, () => {
       "worklet";
-      const tflite = boxedModel.unbox();
       const input = resize(frame, {
         scale: { width: inputMetadata.inputSize, height: inputMetadata.inputSize },
         mirror: true,
         pixelFormat: "rgb",
-        dataType: inputMetadata.resizeDataType,
+        dataType: "uint8",
       });
 
-      if (inputMetadata.expectedBytes <= 0) {
-        reportStatus(true, 0, "input-metadata-missing");
-        return;
-      }
-
       if (input.byteLength !== inputMetadata.expectedBytes) {
-        reportStatus(true, 0, `input-size-${input.byteLength}-expected-${inputMetadata.expectedBytes}`);
+        reportStatus(true, 0, `movenet-input-size-${input.byteLength}`);
         return;
       }
 
       const inputBuffer = input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength) as ArrayBuffer;
+      const tflite = boxedModel.unbox();
+      const outputs = tflite.runSync([inputBuffer]);
+      const output = outputs[outputMetadata.index] ?? outputs[0];
 
-      let outputs: ArrayBuffer[] = [];
-      try {
-        outputs = tflite.runSync([inputBuffer]);
-      } catch (error) {
-        reportStatus(true, 0, "tflite-run-failed");
+      if (output == null) {
+        reportStatus(true, 0, "movenet-output-missing");
         return;
       }
 
-      const landmarkBuffer =
-        landmarkOutputIndex >= 0 && landmarkOutputIndex < outputs.length
-          ? outputs[landmarkOutputIndex]
-          : outputs.find((output) => output.byteLength >= 33 * LANDMARK_STRIDE * 4 && output.byteLength % 4 === 0);
-      if (landmarkBuffer == null) {
-        reportStatus(true, 0, "landmarks-missing");
+      let leftFoot:
+        | {
+            x: number;
+            y: number;
+            score: number;
+          }
+        | undefined;
+      let rightFoot:
+        | {
+            x: number;
+            y: number;
+            score: number;
+          }
+        | undefined;
+
+      if (output.byteLength >= MOVENET_KEYPOINT_VALUES * 4 && output.byteLength % 4 === 0) {
+        const values = new Float32Array(output);
+        leftFoot = readFloatKeypoint(values, LEFT_ANKLE);
+        rightFoot = readFloatKeypoint(values, RIGHT_ANKLE);
+      } else if (output.byteLength >= MOVENET_KEYPOINT_VALUES) {
+        const values = new Uint8Array(output);
+        leftFoot = readByteKeypoint(values, LEFT_ANKLE);
+        rightFoot = readByteKeypoint(values, RIGHT_ANKLE);
+      } else {
+        reportStatus(true, 0, `movenet-output-short-${output.byteLength}`);
         return;
       }
 
-      if (landmarkBuffer.byteLength % 4 !== 0) {
-        reportStatus(true, 0, "landmarks-not-float32");
+      const bestFoot = (leftFoot?.score ?? 0) >= (rightFoot?.score ?? 0) ? leftFoot : rightFoot;
+      if (!bestFoot) {
+        reportStatus(true, 0, "movenet-ankle-missing");
         return;
       }
 
-      const landmarks = new Float32Array(landmarkBuffer);
-      if (landmarks.length < 33 * LANDMARK_STRIDE) {
-        reportStatus(true, 0, "landmarks-short");
-        return;
-      }
-      const leftFoot = contactFromSide(landmarks, LEFT_ANKLE, LEFT_HEEL, LEFT_FOOT_INDEX);
-      const rightFoot = contactFromSide(landmarks, RIGHT_ANKLE, RIGHT_HEEL, RIGHT_FOOT_INDEX);
-      const bestFoot =
-        (leftFoot?.confidence ?? 0) >= (rightFoot?.confidence ?? 0) ? leftFoot : rightFoot;
-
-      const confidence = bestFoot?.confidence ?? 0;
+      const confidence = clamp01(bestFoot.score);
       reportStatus(true, confidence);
-      if (!bestFoot || confidence < 0.6) return;
-      reportFoot(bestFoot.x * width, bestFoot.y * height, confidence);
+      if (confidence < 0.2) return;
+      reportFoot(clamp01(bestFoot.x) * width, clamp01(bestFoot.y) * height, confidence);
     });
-  }, [boxedModel, inputMetadata, landmarkOutputIndex, reportFoot, reportStatus, resize, width, height]);
+  }, [boxedModel, inputMetadata, outputMetadata, reportFoot, reportStatus, resize, width, height]);
 
   if (!hasPermission) {
     return (
@@ -300,14 +229,14 @@ export function OnDeviceVolleyCamera({
         resizeMode="cover"
         frameProcessor={frameProcessor}
       />
-      {debugOverlayEnabled && <FootDebugOverlay width={width} height={height} pose={latestPose} />}
       {showStatusBadge && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>ON-DEVICE AI</Text>
           <Text style={styles.badgeSubText}>
-            {model ? `BlazePose Lite / ${Math.round(inferenceFps)}fps` : modelError ?? "Loading model"}
+            {model ? `MoveNet Lightning / ${Math.round(inferenceFps)}fps` : modelError ?? "Loading model"}
           </Text>
           {model && <Text style={styles.badgeSubText}>{inputMetadata.label}</Text>}
+          {model && <Text style={styles.badgeSubText}>{outputMetadata.label}</Text>}
           <Text style={styles.badgeSubText}>
             frames off-device: {privacy.cameraFramesLeaveDevice ? "yes" : "no"}
           </Text>

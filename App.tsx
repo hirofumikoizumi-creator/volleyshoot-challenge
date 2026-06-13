@@ -167,7 +167,7 @@ const initialFootInputStatus: FootInputStatus = {
   aiReady: false,
   lastDetectedAt: 0,
 };
-const blazePoseLiteModel = require("./assets/models/blazepose_lite.tflite");
+const moveNetLightningModel = require("./assets/models/movenet_singlepose_lightning_int8.tflite");
 const AUTO_KICK_SPEED_THRESHOLD = 0.62;
 const AUTO_KICK_COOLDOWN_MS = 220;
 const AUTO_KICK_DISTANCE_BUFFER = 1.18;
@@ -290,6 +290,10 @@ export default function App() {
     if (screen !== "aiTest" || aiTestStage !== "inference") return null;
     return require("./components/OnDeviceVolleyCamera").OnDeviceVolleyCamera;
   }, [aiTestStage, screen]);
+  const CameraPlayAiCamera = useMemo<OnDeviceVolleyCameraComponent | null>(() => {
+    if (screen !== "cameraPlay" || !footAssistEnabled) return null;
+    return require("./components/OnDeviceVolleyCamera").OnDeviceVolleyCamera;
+  }, [footAssistEnabled, screen]);
 
   useEffect(() => {
     if (fieldSize.width <= 0 || fieldSize.height <= 0 || footTracker.ready) return;
@@ -822,7 +826,7 @@ export default function App() {
                     <ModelTestProbe
                       width={fieldSize.width}
                       height={fieldSize.height}
-                      modelAsset={blazePoseLiteModel}
+                      modelAsset={moveNetLightningModel}
                       onStatus={(status) => {
                         setAiTestLabel(
                           status.ready ? "Step 2 OK: TFLiteモデル読込完了" : `Step 2: ${status.error ?? status.label}`,
@@ -851,7 +855,7 @@ export default function App() {
                     <AiTestCamera
                       width={fieldSize.width}
                       height={fieldSize.height}
-                      modelAsset={blazePoseLiteModel}
+                      modelAsset={moveNetLightningModel}
                       showStatusBadge
                       onFootDetected={(point) => {
                         setAiTestFoot({ ...point, ready: true });
@@ -995,7 +999,25 @@ export default function App() {
                 setFieldSize({ width, height });
               }}
             >
-              <CameraView style={styles.cameraPlayPreview} facing="front" />
+              {CameraPlayAiCamera && fieldSize.width > 0 && fieldSize.height > 0 ? (
+                <CameraPlayAiCamera
+                  width={fieldSize.width}
+                  height={fieldSize.height}
+                  modelAsset={moveNetLightningModel}
+                  onFootDetected={(point) => registerFootPosition(point.x, point.y, "AI", point.confidence)}
+                  onInferenceStatus={(status) => {
+                    setFootInputStatus((current) => ({
+                      ...current,
+                      source: status.ready ? "AI" : current.source,
+                      confidence: status.confidence,
+                      aiReady: status.ready,
+                      error: status.error,
+                    }));
+                  }}
+                />
+              ) : (
+                <CameraView style={styles.cameraPlayPreview} facing="front" />
+              )}
               <Pressable style={styles.cameraPlayOverlay} onPress={shoot}>
                 <View style={styles.cameraPlayHud}>
                   <Text style={styles.cameraPlayHudText}>SCORE {stats.score}</Text>
