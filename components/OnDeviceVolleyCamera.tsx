@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Camera, runAtTargetFps, useCameraDevice, useCameraPermission, useFrameProcessor } from "react-native-vision-camera";
-import { useRunOnJS } from "react-native-worklets-core";
+import { useRunOnJS, useSharedValue } from "react-native-worklets-core";
 import { useResizePlugin } from "vision-camera-resize-plugin";
 import { assertNoNetworkFrameTransport } from "@/lib/pose/on-device-pipeline";
 
@@ -16,8 +16,10 @@ type OnDeviceVolleyCameraProps = {
 
 const INPUT_WIDTH = 96;
 const INPUT_HEIGHT = 96;
-const GRID_COLUMNS = 12;
-const GRID_ROWS = 10;
+const GRID_COLUMNS = 16;
+const GRID_ROWS = 12;
+const GRID_CELL_COUNT = GRID_COLUMNS * GRID_ROWS;
+const FOOT_START_ROW = 5;
 
 function clamp01(value: number) {
   "worklet";
@@ -36,18 +38,27 @@ function sampleBrightness(input: Uint8Array, x: number, y: number) {
   return (r + g + b) / 3;
 }
 
-function detectFootCandidate(input: Uint8Array) {
+type FootCandidate = {
+  x: number;
+  y: number;
+  confidence: number;
+};
+
+function detectFootCandidate(input: Uint8Array, previousCells: number[], previousCandidate: FootCandidate) {
   "worklet";
   let bestScore = 0;
   let bestX = 0.5;
   let bestY = 0.78;
+  let bestMotion = 0;
+  const nextCells = new Array(GRID_CELL_COUNT).fill(0);
   const cellWidth = Math.floor(INPUT_WIDTH / GRID_COLUMNS);
   const cellHeight = Math.floor(INPUT_HEIGHT / GRID_ROWS);
 
-  for (let row = 3; row < GRID_ROWS; row += 1) {
+  for (let row = FOOT_START_ROW; row < GRID_ROWS; row += 1) {
     for (let column = 0; column < GRID_COLUMNS; column += 1) {
       let darkness = 0;
       let contrast = 0;
+      let brightness = 0;
       let samples = 0;
       const startX = column * cellWidth;
       const startY = row * cellHeight;
@@ -59,6 +70,7 @@ function detectFootCandidate(input: Uint8Array) {
           const center = sampleBrightness(input, x, y);
           const right = sampleBrightness(input, x + 2, y);
           const down = sampleBrightness(input, x, y + 2);
+          brightness += center;
           darkness += Math.max(0, 160 - center);
           contrast += Math.abs(center - right) + Math.abs(center - down);
           samples += 1;
@@ -66,22 +78,51 @@ function detectFootCandidate(input: Uint8Array) {
       }
 
       if (samples <= 0) continue;
-      const lowerBias = 0.65 + row / GRID_ROWS;
-      const centerBias = 1 - Math.abs(column / (GRID_COLUMNS - 1) - 0.5) * 0.35;
-      const score = ((darkness / samples) * 0.68 + (contrast / samples) * 0.32) * lowerBias * centerBias;
+      const cellIndex = row * GRID_COLUMNS + column;
+      const averageBrightness = brightness / samples;
+      const previousBrightness = previousCells[cellIndex] ?? averageBrightness;
+      const motion = Math.abs(averageBrightness - previousBrightness);
+      nextCells[cellIndex] = averageBrightness;
+
+      const normalizedX = (startX + endX) / 2 / INPUT_WIDTH;
+      const normalizedY = (startY + endY) / 2 / INPUT_HEIGHT;
+      const lowerBias = 0.72 + row / GRID_ROWS;
+      const sidePenalty = 1 - Math.abs(normalizedX - 0.5) * 0.18;
+      const continuity = previousCandidate.confidence > 0
+        ? Math.max(0.72, 1 - Math.hypot(normalizedX - previousCandidate.x, normalizedY - previousCandidate.y) * 0.8)
+        : 0.86;
+      const motionScore = Math.min(90, motion * 4.6);
+      const appearanceScore = (darkness / samples) * 0.42 + (contrast / samples) * 0.24;
+      const score = (motionScore * 0.64 + appearanceScore * 0.36) * lowerBias * sidePenalty * continuity;
 
       if (score > bestScore) {
         bestScore = score;
-        bestX = (startX + endX) / 2 / INPUT_WIDTH;
-        bestY = (startY + endY) / 2 / INPUT_HEIGHT;
+        bestX = normalizedX;
+        bestY = normalizedY;
+        bestMotion = motion;
       }
     }
   }
 
+  if (bestScore <= 0 && previousCandidate.confidence > 0.08) {
+    return {
+      candidate: {
+        x: previousCandidate.x,
+        y: previousCandidate.y,
+        confidence: previousCandidate.confidence * 0.72,
+      },
+      cells: nextCells,
+    };
+  }
+
+  const rawConfidence = bestMotion < 3 ? bestScore / 190 : bestScore / 135;
   return {
-    x: clamp01(bestX),
-    y: clamp01(bestY),
-    confidence: clamp01(bestScore / 130),
+    candidate: {
+      x: clamp01(bestX),
+      y: clamp01(bestY),
+      confidence: clamp01(rawConfidence),
+    },
+    cells: nextCells,
   };
 }
 
@@ -95,6 +136,8 @@ export function OnDeviceVolleyCamera({
   const device = useCameraDevice("front");
   const { hasPermission, requestPermission } = useCameraPermission();
   const { resize } = useResizePlugin();
+  const previousCells = useSharedValue<number[]>(Array(GRID_CELL_COUNT).fill(0));
+  const previousCandidate = useSharedValue<FootCandidate>({ x: 0.5, y: 0.78, confidence: 0 });
   const reportFoot = useRunOnJS((x: number, y: number, confidence: number) => {
     onFootDetected?.({ x, y, confidence });
   }, [onFootDetected]);
@@ -130,12 +173,23 @@ export function OnDeviceVolleyCamera({
         return;
       }
 
-      const candidate = detectFootCandidate(input);
+      const detection = detectFootCandidate(input, previousCells.value, previousCandidate.value);
+      previousCells.value = detection.cells;
+
+      const last = previousCandidate.value;
+      const alpha = detection.candidate.confidence > 0.32 ? 0.54 : 0.34;
+      const candidate = {
+        x: clamp01(last.x + (detection.candidate.x - last.x) * alpha),
+        y: clamp01(last.y + (detection.candidate.y - last.y) * alpha),
+        confidence: clamp01(last.confidence * 0.4 + detection.candidate.confidence * 0.6),
+      };
+      previousCandidate.value = candidate;
+
       reportStatus(true, candidate.confidence);
-      if (candidate.confidence < 0.12) return;
+      if (candidate.confidence < 0.18) return;
       reportFoot(candidate.x * width, candidate.y * height, candidate.confidence);
     });
-  }, [reportFoot, reportStatus, resize, width, height]);
+  }, [previousCandidate, previousCells, reportFoot, reportStatus, resize, width, height]);
 
   if (!hasPermission) {
     return (
@@ -165,7 +219,7 @@ export function OnDeviceVolleyCamera({
       {showStatusBadge && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>ON-DEVICE FOOT</Text>
-          <Text style={styles.badgeSubText}>safe pixel tracker / no TFLite runtime</Text>
+          <Text style={styles.badgeSubText}>motion foot tracker / no TFLite runtime</Text>
           <Text style={styles.badgeSubText}>
             frames off-device: {privacy.cameraFramesLeaveDevice ? "yes" : "no"}
           </Text>
