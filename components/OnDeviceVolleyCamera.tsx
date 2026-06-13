@@ -29,6 +29,64 @@ const RIGHT_HEEL = 30;
 const LEFT_FOOT_INDEX = 31;
 const RIGHT_FOOT_INDEX = 32;
 
+type ModelTensorDataType =
+  | "string"
+  | "float16"
+  | "float32"
+  | "float64"
+  | "bfloat16"
+  | "int4"
+  | "int8"
+  | "int16"
+  | "int32"
+  | "int64"
+  | "uint8"
+  | "uint16"
+  | "uint32"
+  | "uint64"
+  | "bool"
+  | "complex64"
+  | "complex128"
+  | "resource"
+  | "variant"
+  | "none";
+
+function tensorDataTypeBytes(dataType: ModelTensorDataType) {
+  switch (dataType) {
+    case "float16":
+    case "bfloat16":
+    case "int16":
+    case "uint16":
+      return 2;
+    case "float32":
+    case "int32":
+    case "uint32":
+      return 4;
+    case "float64":
+    case "int64":
+    case "uint64":
+      return 8;
+    case "int4":
+      return 0.5;
+    case "int8":
+    case "uint8":
+    case "bool":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function tensorElementCount(shape: number[]) {
+  return shape.reduce((total, value) => total * Math.max(1, Math.round(value)), 1);
+}
+
+function inferSquareInputSize(shape: number[]) {
+  const imageDimensions = shape.map((value) => Math.round(value)).filter((value) => value >= 32);
+  if (imageDimensions.length < 2) return MODEL_INPUT_SIZE;
+  return Math.min(imageDimensions[0] ?? MODEL_INPUT_SIZE, imageDimensions[1] ?? MODEL_INPUT_SIZE);
+}
+
 function normalizedLandmarkValue(value: number) {
   "worklet";
   if (!Number.isFinite(value)) return 0;
@@ -77,6 +135,39 @@ export function OnDeviceVolleyCamera({
   const modelState = useTensorflowModel(modelAsset ?? 0, []);
   const model = modelState.state === "loaded" ? modelState.model : undefined;
   const boxedModel = useMemo(() => (model ? NitroModules.box(model) : undefined), [model]);
+  const inputMetadata = useMemo(() => {
+    const inputTensor = model?.inputs[0];
+    if (!inputTensor) {
+      return {
+        expectedBytes: 0,
+        inputSize: MODEL_INPUT_SIZE,
+        resizeDataType: "uint8" as const,
+        label: "input: unknown",
+      };
+    }
+
+    const bytesPerValue = tensorDataTypeBytes(inputTensor.dataType);
+    const expectedBytes = Math.round(tensorElementCount(inputTensor.shape) * bytesPerValue);
+    const resizeDataType: "float32" | "uint8" = inputTensor.dataType === "float32" ? "float32" : "uint8";
+
+    return {
+      expectedBytes,
+      inputSize: inferSquareInputSize(inputTensor.shape),
+      resizeDataType,
+      label: `${inputTensor.dataType} ${inputTensor.shape.join("x")} / ${expectedBytes}b`,
+    };
+  }, [model]);
+  const landmarkOutputIndex = useMemo(() => {
+    const outputs = model?.outputs ?? [];
+    const exactIndex = outputs.findIndex(
+      (output) => output.dataType === "float32" && tensorElementCount(output.shape) === 33 * LANDMARK_STRIDE,
+    );
+    if (exactIndex >= 0) return exactIndex;
+
+    return outputs.findIndex(
+      (output) => output.dataType === "float32" && tensorElementCount(output.shape) >= 33 * LANDMARK_STRIDE,
+    );
+  }, [model]);
   const { resize } = useResizePlugin();
   const reportFoot = useRunOnJS((x: number, y: number, confidence: number) => {
     onFootDetected?.({ x, y, confidence });
@@ -127,17 +218,43 @@ export function OnDeviceVolleyCamera({
       "worklet";
       const tflite = boxedModel.unbox();
       const input = resize(frame, {
-        scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
+        scale: { width: inputMetadata.inputSize, height: inputMetadata.inputSize },
         mirror: true,
         pixelFormat: "rgb",
-        dataType: "float32",
+        dataType: inputMetadata.resizeDataType,
       });
+
+      if (inputMetadata.expectedBytes <= 0) {
+        reportStatus(true, 0, "input-metadata-missing");
+        return;
+      }
+
+      if (input.byteLength !== inputMetadata.expectedBytes) {
+        reportStatus(true, 0, `input-size-${input.byteLength}-expected-${inputMetadata.expectedBytes}`);
+        return;
+      }
+
       const inputBuffer = input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength) as ArrayBuffer;
 
-      const outputs = tflite.runSync([inputBuffer]);
-      const landmarkBuffer = outputs.find((output) => output.byteLength >= 33 * LANDMARK_STRIDE * 4);
+      let outputs: ArrayBuffer[] = [];
+      try {
+        outputs = tflite.runSync([inputBuffer]);
+      } catch (error) {
+        reportStatus(true, 0, "tflite-run-failed");
+        return;
+      }
+
+      const landmarkBuffer =
+        landmarkOutputIndex >= 0 && landmarkOutputIndex < outputs.length
+          ? outputs[landmarkOutputIndex]
+          : outputs.find((output) => output.byteLength >= 33 * LANDMARK_STRIDE * 4 && output.byteLength % 4 === 0);
       if (landmarkBuffer == null) {
         reportStatus(true, 0, "landmarks-missing");
+        return;
+      }
+
+      if (landmarkBuffer.byteLength % 4 !== 0) {
+        reportStatus(true, 0, "landmarks-not-float32");
         return;
       }
 
@@ -156,7 +273,7 @@ export function OnDeviceVolleyCamera({
       if (!bestFoot || confidence < 0.6) return;
       reportFoot(bestFoot.x * width, bestFoot.y * height, confidence);
     });
-  }, [boxedModel, reportFoot, reportStatus, resize, width, height]);
+  }, [boxedModel, inputMetadata, landmarkOutputIndex, reportFoot, reportStatus, resize, width, height]);
 
   if (!hasPermission) {
     return (
@@ -190,6 +307,7 @@ export function OnDeviceVolleyCamera({
           <Text style={styles.badgeSubText}>
             {model ? `BlazePose Lite / ${Math.round(inferenceFps)}fps` : modelError ?? "Loading model"}
           </Text>
+          {model && <Text style={styles.badgeSubText}>{inputMetadata.label}</Text>}
           <Text style={styles.badgeSubText}>
             frames off-device: {privacy.cameraFramesLeaveDevice ? "yes" : "no"}
           </Text>
