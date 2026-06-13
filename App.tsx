@@ -16,13 +16,6 @@ type Screen = "home" | "rules" | "play" | "result" | "camera" | "cameraPlay";
 type BallType = "NORMAL" | "BLUE" | "GOLD";
 type ShotResult = "PERFECT" | "GOOD" | "MISS" | "AVOID";
 type RecognitionRange = "FULL_BODY" | "LOWER_BODY" | "FEET";
-type OnDeviceVolleyCameraComponent = React.ComponentType<{
-  width: number;
-  height: number;
-  modelAsset?: number;
-  onFootDetected?: (point: { x: number; y: number; confidence: number }) => void;
-  onInferenceStatus?: (status: { ready: boolean; confidence: number; error?: string }) => void;
-}>;
 
 type Ball = {
   id: number;
@@ -149,7 +142,6 @@ const initialFootInputStatus: FootInputStatus = {
   aiReady: false,
   lastDetectedAt: 0,
 };
-const blazePoseLiteModel = require("./assets/models/blazepose_lite.tflite");
 const AUTO_KICK_SPEED_THRESHOLD = 0.62;
 const AUTO_KICK_COOLDOWN_MS = 220;
 const AUTO_KICK_DISTANCE_BUFFER = 1.18;
@@ -211,7 +203,7 @@ export default function App() {
   const [recognitionRange, setRecognitionRange] = useState<RecognitionRange>("LOWER_BODY");
   const [footTracker, setFootTracker] = useState<FootTracker>(initialFootTracker);
   const [footInputStatus, setFootInputStatus] = useState<FootInputStatus>(initialFootInputStatus);
-  const [aiCameraEnabled, setAiCameraEnabled] = useState(false);
+  const [footAssistEnabled, setFootAssistEnabled] = useState(true);
 
   const ballIdRef = useRef(1);
   const lastTickRef = useRef(Date.now());
@@ -247,11 +239,7 @@ export default function App() {
   const swingReadiness = Math.min(100, Math.round((footTracker.speed / AUTO_KICK_SPEED_THRESHOLD) * 100));
   const footDistanceLabel = Number.isFinite(footBallDistance) ? `${Math.round(footBallDistance)}px` : "--";
   const footInputLabel = footInputStatus.source === "AI" ? "AUTO" : "TOUCH";
-  const aiStatusLabel = aiCameraEnabled ? (footInputStatus.aiReady ? "AI FOOT" : "AI LOADING") : "SAFE CAMERA";
-  const OnDeviceVolleyCamera = useMemo<OnDeviceVolleyCameraComponent | null>(() => {
-    if (!aiCameraEnabled) return null;
-    return require("./components/OnDeviceVolleyCamera").OnDeviceVolleyCamera;
-  }, [aiCameraEnabled]);
+  const cameraStatusLabel = footAssistEnabled ? "FOOT READY" : "CAMERA SAFE";
 
   useEffect(() => {
     if (fieldSize.width <= 0 || fieldSize.height <= 0 || footTracker.ready) return;
@@ -275,7 +263,7 @@ export default function App() {
     setMessage(nextMessage);
     setFootTracker(initialFootTracker);
     setFootInputStatus(initialFootInputStatus);
-    setAiCameraEnabled(false);
+    setFootAssistEnabled(true);
     footTrackerRef.current = initialFootTracker;
     elapsedRef.current = 0;
     spawnElapsedRef.current = nextConfig.spawnMs;
@@ -735,24 +723,7 @@ export default function App() {
                 setFieldSize({ width, height });
               }}
             >
-              {OnDeviceVolleyCamera && fieldSize.width > 0 && fieldSize.height > 0 ? (
-                <OnDeviceVolleyCamera
-                  width={fieldSize.width}
-                  height={fieldSize.height}
-                  modelAsset={blazePoseLiteModel}
-                  onFootDetected={(point) => registerFootPosition(point.x, point.y, "AI", point.confidence)}
-                  onInferenceStatus={(status) =>
-                    setFootInputStatus((current) => ({
-                      ...current,
-                      aiReady: status.ready,
-                      confidence: status.confidence,
-                      error: status.error,
-                    }))
-                  }
-                />
-              ) : (
-                <CameraView style={styles.cameraPlayPreview} facing="front" />
-              )}
+              <CameraView style={styles.cameraPlayPreview} facing="front" />
               <Pressable style={styles.cameraPlayOverlay} onPress={shoot}>
                 <View style={styles.cameraPlayHud}>
                   <Text style={styles.cameraPlayHudText}>SCORE {stats.score}</Text>
@@ -763,10 +734,10 @@ export default function App() {
                 </View>
                 <View style={styles.aiStatusPill}>
                   <Text style={styles.aiStatusText}>
-                    {aiStatusLabel} {Math.round(footInputStatus.confidence * 100)}%
+                    {cameraStatusLabel} {Math.round(footInputStatus.confidence * 100)}%
                   </Text>
                   <Text style={styles.aiStatusSubText}>
-                    {aiCameraEnabled ? footInputLabel : "TOUCH READY"} / {isFootNearBall ? "BALL IN" : "TRACKING"}
+                    {footAssistEnabled ? footInputLabel : "TOUCH OFF"} / {isFootNearBall ? "BALL IN" : "TRACKING"}
                   </Text>
                 </View>
                 <View style={styles.volleyTuningPanel}>
@@ -844,21 +815,22 @@ export default function App() {
                     <Text style={styles.cameraPlayMiniText}>{isPaused ? "再開" : "停止"}</Text>
                   </Pressable>
                   <Pressable
-                    style={[styles.cameraPlayMiniButton, aiCameraEnabled && styles.cameraPlayMiniButtonActive]}
+                    style={[styles.cameraPlayMiniButton, footAssistEnabled && styles.cameraPlayMiniButtonActive]}
                     onPress={() => {
-                      const nextEnabled = !aiCameraEnabled;
-                      setAiCameraEnabled(nextEnabled);
+                      const nextEnabled = !footAssistEnabled;
+                      setFootAssistEnabled(nextEnabled);
                       setFootInputStatus((current) => ({
                         ...current,
                         aiReady: false,
                         confidence: 0,
-                        source: nextEnabled ? current.source : "MANUAL",
+                        source: "MANUAL",
                         error: undefined,
                       }));
+                      setMessage(nextEnabled ? "足判定をONにしました" : "足判定をOFFにしました");
                     }}
                   >
-                    <Text style={[styles.cameraPlayMiniText, aiCameraEnabled && styles.cameraPlayMiniTextActive]}>
-                      {aiCameraEnabled ? "AI停止" : "AI開始"}
+                    <Text style={[styles.cameraPlayMiniText, footAssistEnabled && styles.cameraPlayMiniTextActive]}>
+                      {footAssistEnabled ? "足判定ON" : "足判定OFF"}
                     </Text>
                   </Pressable>
                   <Pressable style={styles.cameraPlayShotButton} onPress={shoot}>
@@ -878,10 +850,12 @@ export default function App() {
               <View
                 style={styles.footTouchLayer}
                 onTouchStart={(event) => {
+                  if (!footAssistEnabled) return;
                   const touch = event.nativeEvent;
                   registerFootPosition(touch.locationX, touch.locationY, "MANUAL", 1);
                 }}
                 onTouchMove={(event) => {
+                  if (!footAssistEnabled) return;
                   const touch = event.nativeEvent;
                   registerFootPosition(touch.locationX, touch.locationY, "MANUAL", 1);
                 }}
