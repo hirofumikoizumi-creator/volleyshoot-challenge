@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { NitroModules } from "react-native-nitro-modules";
 import { Camera, runAtTargetFps, useCameraDevice, useCameraPermission, useFrameProcessor } from "react-native-vision-camera";
 import { useTensorflowModel } from "react-native-fast-tflite";
 import { useRunOnJS } from "react-native-worklets-core";
@@ -75,6 +76,7 @@ export function OnDeviceVolleyCamera({
   const { debugOverlayEnabled, inferenceFps, setModelReady } = usePosePipelineStore();
   const modelState = useTensorflowModel(modelAsset ?? 0, []);
   const model = modelState.state === "loaded" ? modelState.model : undefined;
+  const boxedModel = useMemo(() => (model ? NitroModules.box(model) : undefined), [model]);
   const { resize } = useResizePlugin();
   const reportFoot = useRunOnJS((x: number, y: number, confidence: number) => {
     onFootDetected?.({ x, y, confidence });
@@ -119,18 +121,20 @@ export function OnDeviceVolleyCamera({
 
   const frameProcessor = useFrameProcessor((frame) => {
     "worklet";
-    if (model == null) return;
+    if (boxedModel == null) return;
 
     runAtTargetFps(15, () => {
       "worklet";
+      const tflite = boxedModel.unbox();
       const input = resize(frame, {
         scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
         mirror: true,
         pixelFormat: "rgb",
         dataType: "float32",
       });
+      const inputBuffer = input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength) as ArrayBuffer;
 
-      const outputs = model.runSync([input.buffer as ArrayBuffer]);
+      const outputs = tflite.runSync([inputBuffer]);
       const landmarkBuffer = outputs.find((output) => output.byteLength >= 33 * LANDMARK_STRIDE * 4);
       if (landmarkBuffer == null) {
         reportStatus(true, 0, "landmarks-missing");
@@ -152,7 +156,7 @@ export function OnDeviceVolleyCamera({
       if (!bestFoot || confidence < 0.6) return;
       reportFoot(bestFoot.x * width, bestFoot.y * height, confidence);
     });
-  }, [model, reportFoot, reportStatus, resize, width, height]);
+  }, [boxedModel, reportFoot, reportStatus, resize, width, height]);
 
   if (!hasPermission) {
     return (

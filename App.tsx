@@ -12,10 +12,18 @@ import {
 import { CameraView, useCameraPermissions } from "expo-camera";
 
 type Difficulty = "EASY" | "NORMAL" | "HARD";
-type Screen = "home" | "rules" | "play" | "result" | "camera" | "cameraPlay";
+type Screen = "home" | "rules" | "play" | "result" | "camera" | "cameraPlay" | "aiTest";
 type BallType = "NORMAL" | "BLUE" | "GOLD";
 type ShotResult = "PERFECT" | "GOOD" | "MISS" | "AVOID";
 type RecognitionRange = "FULL_BODY" | "LOWER_BODY" | "FEET";
+type OnDeviceVolleyCameraComponent = React.ComponentType<{
+  width: number;
+  height: number;
+  modelAsset?: number;
+  showStatusBadge?: boolean;
+  onFootDetected?: (point: { x: number; y: number; confidence: number }) => void;
+  onInferenceStatus?: (status: { ready: boolean; confidence: number; error?: string }) => void;
+}>;
 
 type Ball = {
   id: number;
@@ -142,6 +150,7 @@ const initialFootInputStatus: FootInputStatus = {
   aiReady: false,
   lastDetectedAt: 0,
 };
+const blazePoseLiteModel = require("./assets/models/blazepose_lite.tflite");
 const AUTO_KICK_SPEED_THRESHOLD = 0.62;
 const AUTO_KICK_COOLDOWN_MS = 220;
 const AUTO_KICK_DISTANCE_BUFFER = 1.18;
@@ -204,6 +213,9 @@ export default function App() {
   const [footTracker, setFootTracker] = useState<FootTracker>(initialFootTracker);
   const [footInputStatus, setFootInputStatus] = useState<FootInputStatus>(initialFootInputStatus);
   const [footAssistEnabled, setFootAssistEnabled] = useState(true);
+  const [aiTestInferenceEnabled, setAiTestInferenceEnabled] = useState(false);
+  const [aiTestStatus, setAiTestStatus] = useState<FootInputStatus>(initialFootInputStatus);
+  const [aiTestFoot, setAiTestFoot] = useState({ x: 0, y: 0, confidence: 0, ready: false });
 
   const ballIdRef = useRef(1);
   const lastTickRef = useRef(Date.now());
@@ -240,6 +252,10 @@ export default function App() {
   const footDistanceLabel = Number.isFinite(footBallDistance) ? `${Math.round(footBallDistance)}px` : "--";
   const footInputLabel = footInputStatus.source === "AI" ? "AUTO" : "TOUCH";
   const cameraStatusLabel = footAssistEnabled ? "FOOT READY" : "CAMERA SAFE";
+  const AiTestCamera = useMemo<OnDeviceVolleyCameraComponent | null>(() => {
+    if (screen !== "aiTest" || !aiTestInferenceEnabled) return null;
+    return require("./components/OnDeviceVolleyCamera").OnDeviceVolleyCamera;
+  }, [aiTestInferenceEnabled, screen]);
 
   useEffect(() => {
     if (fieldSize.width <= 0 || fieldSize.height <= 0 || footTracker.ready) return;
@@ -293,6 +309,16 @@ export default function App() {
     footTrackerRef.current = nextFoot;
     setFootTracker(nextFoot);
     setScreen("cameraPlay");
+  };
+
+  const startAiFootTest = async () => {
+    setAiTestInferenceEnabled(false);
+    setAiTestStatus(initialFootInputStatus);
+    setAiTestFoot({ x: 0, y: 0, confidence: 0, ready: false });
+    if (!cameraPermission?.granted && cameraPermission?.canAskAgain !== false) {
+      await requestCameraPermission();
+    }
+    setScreen("aiTest");
   };
 
   const finishGame = () => {
@@ -596,6 +622,10 @@ export default function App() {
             <Pressable style={styles.cameraButton} onPress={() => setScreen("camera")}>
               <Text style={styles.cameraButtonText}>カメラプレイ準備</Text>
             </Pressable>
+
+            <Pressable style={styles.aiTestButton} onPress={startAiFootTest}>
+              <Text style={styles.aiTestButtonText}>AI足認識テスト</Text>
+            </Pressable>
           </ScrollView>
         )}
 
@@ -708,6 +738,122 @@ export default function App() {
               {cameraPermission?.granted && (
                 <Pressable style={styles.cameraStartButton} onPress={startCameraGame}>
                   <Text style={styles.cameraStartText}>この画面でプレー開始</Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        )}
+
+        {screen === "aiTest" && (
+          <View style={styles.cameraRoot}>
+            <View style={styles.cameraHeader}>
+              <View>
+                <Text style={styles.cameraTitle}>AI足認識テスト</Text>
+                <Text style={styles.cameraStatus}>
+                  {aiTestInferenceEnabled
+                    ? aiTestStatus.aiReady
+                      ? `推論中 / ${Math.round(aiTestStatus.confidence * 100)}%`
+                      : aiTestStatus.error ?? "AI推論を初期化中"
+                    : "Step 1: カメラ確認 / Step 2: AI推論開始"}
+                </Text>
+              </View>
+              <Pressable
+                style={styles.headerButton}
+                onPress={() => {
+                  setAiTestInferenceEnabled(false);
+                  setScreen("home");
+                }}
+              >
+                <Text style={styles.headerButtonText}>戻る</Text>
+              </Pressable>
+            </View>
+
+            <View
+              style={styles.cameraPreviewFrame}
+              onLayout={(event) => {
+                const { width, height } = event.nativeEvent.layout;
+                setFieldSize({ width, height });
+              }}
+            >
+              {cameraPermission?.granted ? (
+                <>
+                  {AiTestCamera && fieldSize.width > 0 && fieldSize.height > 0 ? (
+                    <AiTestCamera
+                      width={fieldSize.width}
+                      height={fieldSize.height}
+                      modelAsset={blazePoseLiteModel}
+                      showStatusBadge
+                      onFootDetected={(point) => {
+                        setAiTestFoot({ ...point, ready: true });
+                        setAiTestStatus((current) => ({
+                          ...current,
+                          source: "AI",
+                          confidence: point.confidence,
+                          aiReady: true,
+                          lastDetectedAt: Date.now(),
+                          error: undefined,
+                        }));
+                      }}
+                      onInferenceStatus={(status) =>
+                        setAiTestStatus((current) => ({
+                          ...current,
+                          aiReady: status.ready,
+                          confidence: status.confidence,
+                          error: status.error,
+                        }))
+                      }
+                    />
+                  ) : (
+                    <CameraView style={styles.cameraPreview} facing="front">
+                      <View style={styles.cameraOverlay}>
+                        <Text style={styles.cameraOverlayText}>
+                          カメラが映ったら AI推論開始 を押してください。通常プレイとは分離しているため、ここで足認識だけ検証できます。
+                        </Text>
+                      </View>
+                    </CameraView>
+                  )}
+
+                  {aiTestFoot.ready && (
+                    <View
+                      style={[
+                        styles.aiFootDot,
+                        {
+                          left: aiTestFoot.x - 14,
+                          top: aiTestFoot.y - 14,
+                        },
+                      ]}
+                    >
+                      <Text style={styles.aiFootDotText}>{Math.round(aiTestFoot.confidence * 100)}</Text>
+                    </View>
+                  )}
+                </>
+              ) : (
+                <View style={styles.permissionPanel}>
+                  <Text style={styles.permissionTitle}>カメラを使う準備</Text>
+                  <Text style={styles.permissionText}>AI足認識テストにはフロントカメラが必要です。</Text>
+                  <Pressable style={styles.primaryButton} onPress={requestCameraPermission}>
+                    <Text style={styles.primaryText}>カメラを許可</Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.cameraFooter}>
+              <Text style={styles.cameraHint}>
+                このテストは端末内だけで処理します。映像フレームは外部送信しません。
+              </Text>
+              {cameraPermission?.granted && (
+                <Pressable
+                  style={[styles.cameraStartButton, aiTestInferenceEnabled && styles.cameraStartButtonActive]}
+                  onPress={() => {
+                    setAiTestFoot({ x: 0, y: 0, confidence: 0, ready: false });
+                    setAiTestStatus(initialFootInputStatus);
+                    setAiTestInferenceEnabled((value) => !value);
+                  }}
+                >
+                  <Text style={styles.cameraStartText}>
+                    {aiTestInferenceEnabled ? "AI推論停止" : "AI推論開始"}
+                  </Text>
                 </Pressable>
               )}
             </View>
@@ -1305,6 +1451,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "800",
   },
+  aiTestButton: {
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    backgroundColor: "rgba(250,204,21,0.13)",
+    borderWidth: 1,
+    borderColor: "rgba(250,204,21,0.46)",
+  },
+  aiTestButtonText: {
+    color: "#FACC15",
+    fontSize: 16,
+    fontWeight: "900",
+  },
   ruleText: {
     color: "#C9D6E2",
     fontSize: 16,
@@ -1561,9 +1721,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(0,217,255,0.45)",
   },
+  cameraStartButtonActive: {
+    backgroundColor: "rgba(255,107,107,0.18)",
+    borderColor: "rgba(255,107,107,0.48)",
+  },
   cameraStartText: {
     color: "#00D9FF",
     fontSize: 12,
+    fontWeight: "900",
+  },
+  aiFootDot: {
+    position: "absolute",
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(163,255,18,0.9)",
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+  },
+  aiFootDotText: {
+    color: "#08111F",
+    fontSize: 9,
     fontWeight: "900",
   },
   cameraPlayRoot: {
