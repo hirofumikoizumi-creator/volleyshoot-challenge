@@ -268,8 +268,12 @@ export default function App() {
   const isFootNearBall = Number.isFinite(footBallDistance) && footBallDistance <= footReach.good * AUTO_KICK_DISTANCE_BUFFER;
   const swingReadiness = Math.min(100, Math.round((footTracker.speed / AUTO_KICK_SPEED_THRESHOLD) * 100));
   const footDistanceLabel = Number.isFinite(footBallDistance) ? `${Math.round(footBallDistance)}px` : "--";
-  const footInputLabel = footInputStatus.source === "AI" ? "AUTO" : "TOUCH";
-  const cameraStatusLabel = footAssistEnabled ? "FOOT READY" : "CAMERA SAFE";
+  const hasFootLock =
+    footInputStatus.source === "AI" &&
+    footInputStatus.confidence >= 0.22 &&
+    Date.now() - footInputStatus.lastDetectedAt < 900;
+  const footInputLabel = hasFootLock ? "FOOT LOCK" : footInputStatus.source === "AI" ? "SEARCHING" : "TOUCH";
+  const cameraStatusLabel = footAssistEnabled ? (hasFootLock ? "READY" : "FOOT SEARCH") : "TOUCH MODE";
   const VisionTestCamera = useMemo<OnDeviceVisionCameraProbeComponent | null>(() => {
     if (screen !== "aiTest" || aiTestStage !== "vision") return null;
     return require("./components/OnDeviceVisionCameraProbe").OnDeviceVisionCameraProbe;
@@ -659,11 +663,11 @@ export default function App() {
             </Pressable>
 
             <Pressable style={styles.cameraButton} onPress={() => setScreen("camera")}>
-              <Text style={styles.cameraButtonText}>カメラプレイ準備</Text>
+              <Text style={styles.cameraButtonText}>ボレチャレ開始</Text>
             </Pressable>
 
             <Pressable style={styles.aiTestButton} onPress={startAiFootTest}>
-              <Text style={styles.aiTestButtonText}>AI足認識テスト</Text>
+              <Text style={styles.aiTestButtonText}>足認識チェック</Text>
             </Pressable>
           </ScrollView>
         )}
@@ -1031,7 +1035,7 @@ export default function App() {
                     {cameraStatusLabel} {Math.round(footInputStatus.confidence * 100)}%
                   </Text>
                   <Text style={styles.aiStatusSubText}>
-                    {footAssistEnabled ? footInputLabel : "TOUCH OFF"} / {isFootNearBall ? "BALL IN" : "TRACKING"}
+                    {footAssistEnabled ? footInputLabel : "TOUCH"} / {isFootNearBall ? "STRIKE ZONE" : "MOVE FOOT"}
                   </Text>
                 </View>
                 <View style={styles.volleyTuningPanel}>
@@ -1050,33 +1054,37 @@ export default function App() {
                 </View>
 
                 <View style={styles.volleyLane} />
-                <View
-                  style={[
-                    styles.footReachZone,
-                    {
-                      left: footTracker.x - footReach.good,
-                      top: footTracker.y - footReach.good,
-                      width: footReach.good * 2,
-                      height: footReach.good * 2,
-                      borderRadius: footReach.good,
-                    },
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.footMarker,
-                    {
-                      left: footTracker.x - footReach.marker,
-                      top: footTracker.y - footReach.marker,
-                      width: footReach.marker * 2,
-                      height: footReach.marker * 1.18,
-                      borderRadius: footReach.marker,
-                      transform: [{ rotate: `${Math.max(-34, Math.min(34, footTracker.speed * 18))}deg` }],
-                    },
-                  ]}
-                >
-                  <Text style={styles.footMarkerText}>{footInputStatus.source === "AI" ? "AI" : "TOUCH"}</Text>
-                </View>
+                {(hasFootLock || footInputStatus.source === "MANUAL") && (
+                  <>
+                    <View
+                      style={[
+                        styles.footReachZone,
+                        {
+                          left: footTracker.x - footReach.good,
+                          top: footTracker.y - footReach.good,
+                          width: footReach.good * 2,
+                          height: footReach.good * 2,
+                          borderRadius: footReach.good,
+                        },
+                      ]}
+                    />
+                    <View
+                      style={[
+                        styles.footMarker,
+                        {
+                          left: footTracker.x - footReach.marker,
+                          top: footTracker.y - footReach.marker,
+                          width: footReach.marker * 2,
+                          height: footReach.marker * 1.18,
+                          borderRadius: footReach.marker,
+                          transform: [{ rotate: `${Math.max(-34, Math.min(34, footTracker.speed * 18))}deg` }],
+                        },
+                      ]}
+                    >
+                      <Text style={styles.footMarkerText}>{hasFootLock ? "FOOT" : "TOUCH"}</Text>
+                    </View>
+                  </>
+                )}
 
                 {balls.map((ball) => (
                   <View

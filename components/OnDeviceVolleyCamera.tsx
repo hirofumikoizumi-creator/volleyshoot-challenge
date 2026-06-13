@@ -222,7 +222,7 @@ export function OnDeviceVolleyCamera({
       previousCandidate.value = candidate;
 
       reportStatus(true, candidate.confidence);
-      if (candidate.confidence < 0.18) return;
+      if (candidate.confidence < 0.22) return;
       reportFoot(candidate.x * width, candidate.y * height, candidate.confidence);
     });
   }, [previousCandidate, previousCells, reportFoot, reportStatus, resize, width, height]);
@@ -255,7 +255,7 @@ export function OnDeviceVolleyCamera({
       {showStatusBadge && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>ON-DEVICE FOOT</Text>
-          <Text style={styles.badgeSubText}>motion foot tracker / no TFLite runtime</Text>
+          <Text style={styles.badgeSubText}>foot motion tracking</Text>
           <Text style={styles.badgeSubText}>
             frames off-device: {privacy.cameraFramesLeaveDevice ? "yes" : "no"}
           </Text>
