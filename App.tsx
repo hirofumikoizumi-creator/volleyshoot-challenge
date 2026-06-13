@@ -881,7 +881,7 @@ export default function App() {
                     <CameraView style={styles.cameraPreview} facing="front">
                       <View style={styles.cameraOverlay}>
                         <Text style={styles.cameraOverlayText}>
-                          Vision、モデル、FrameProcessor、Resize、足推論の順で試してください。
+                          Vision、モデル、FrameProcessor、Resize、安全足検出の順で試してください。
                         </Text>
                       </View>
                     </CameraView>
@@ -967,11 +967,11 @@ export default function App() {
                     onPress={() => {
                       setAiTestFoot({ x: 0, y: 0, confidence: 0, ready: false });
                       setAiTestStatus(initialFootInputStatus);
-                      setAiTestLabel("Step 5: 足推論を初期化中");
+                      setAiTestLabel("Step 5: 安全足検出を初期化中");
                       setAiTestStage("inference");
                     }}
                   >
-                    <Text style={styles.cameraStartText}>5 推論</Text>
+                    <Text style={styles.cameraStartText}>5 足検出</Text>
                   </Pressable>
                   <Pressable
                     style={styles.aiTestStepButton}
