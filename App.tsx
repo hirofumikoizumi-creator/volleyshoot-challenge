@@ -10,13 +10,19 @@ import {
   View,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { OnDeviceVolleyCamera } from "./components/OnDeviceVolleyCamera";
 
 type Difficulty = "EASY" | "NORMAL" | "HARD";
 type Screen = "home" | "rules" | "play" | "result" | "camera" | "cameraPlay";
 type BallType = "NORMAL" | "BLUE" | "GOLD";
 type ShotResult = "PERFECT" | "GOOD" | "MISS" | "AVOID";
 type RecognitionRange = "FULL_BODY" | "LOWER_BODY" | "FEET";
+type OnDeviceVolleyCameraComponent = React.ComponentType<{
+  width: number;
+  height: number;
+  modelAsset?: number;
+  onFootDetected?: (point: { x: number; y: number; confidence: number }) => void;
+  onInferenceStatus?: (status: { ready: boolean; confidence: number; error?: string }) => void;
+}>;
 
 type Ball = {
   id: number;
@@ -242,6 +248,10 @@ export default function App() {
   const footDistanceLabel = Number.isFinite(footBallDistance) ? `${Math.round(footBallDistance)}px` : "--";
   const footInputLabel = footInputStatus.source === "AI" ? "AUTO" : "TOUCH";
   const aiStatusLabel = aiCameraEnabled ? (footInputStatus.aiReady ? "AI FOOT" : "AI LOADING") : "SAFE CAMERA";
+  const OnDeviceVolleyCamera = useMemo<OnDeviceVolleyCameraComponent | null>(() => {
+    if (!aiCameraEnabled) return null;
+    return require("./components/OnDeviceVolleyCamera").OnDeviceVolleyCamera;
+  }, [aiCameraEnabled]);
 
   useEffect(() => {
     if (fieldSize.width <= 0 || fieldSize.height <= 0 || footTracker.ready) return;
@@ -725,7 +735,7 @@ export default function App() {
                 setFieldSize({ width, height });
               }}
             >
-              {aiCameraEnabled && fieldSize.width > 0 && fieldSize.height > 0 ? (
+              {OnDeviceVolleyCamera && fieldSize.width > 0 && fieldSize.height > 0 ? (
                 <OnDeviceVolleyCamera
                   width={fieldSize.width}
                   height={fieldSize.height}
