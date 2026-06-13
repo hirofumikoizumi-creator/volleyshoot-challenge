@@ -16,6 +16,7 @@ type Screen = "home" | "rules" | "play" | "result" | "camera" | "cameraPlay" | "
 type BallType = "NORMAL" | "BLUE" | "GOLD";
 type ShotResult = "PERFECT" | "GOOD" | "MISS" | "AVOID";
 type RecognitionRange = "FULL_BODY" | "LOWER_BODY" | "FEET";
+type AiTestStage = "preview" | "vision" | "model" | "inference";
 type OnDeviceVolleyCameraComponent = React.ComponentType<{
   width: number;
   height: number;
@@ -23,6 +24,17 @@ type OnDeviceVolleyCameraComponent = React.ComponentType<{
   showStatusBadge?: boolean;
   onFootDetected?: (point: { x: number; y: number; confidence: number }) => void;
   onInferenceStatus?: (status: { ready: boolean; confidence: number; error?: string }) => void;
+}>;
+type OnDeviceVisionCameraProbeComponent = React.ComponentType<{
+  width: number;
+  height: number;
+  onStatus?: (status: string) => void;
+}>;
+type OnDeviceTfliteModelProbeComponent = React.ComponentType<{
+  width: number;
+  height: number;
+  modelAsset?: number;
+  onStatus?: (status: { ready: boolean; label: string; error?: string }) => void;
 }>;
 
 type Ball = {
@@ -213,9 +225,10 @@ export default function App() {
   const [footTracker, setFootTracker] = useState<FootTracker>(initialFootTracker);
   const [footInputStatus, setFootInputStatus] = useState<FootInputStatus>(initialFootInputStatus);
   const [footAssistEnabled, setFootAssistEnabled] = useState(true);
-  const [aiTestInferenceEnabled, setAiTestInferenceEnabled] = useState(false);
+  const [aiTestStage, setAiTestStage] = useState<AiTestStage>("preview");
   const [aiTestStatus, setAiTestStatus] = useState<FootInputStatus>(initialFootInputStatus);
   const [aiTestFoot, setAiTestFoot] = useState({ x: 0, y: 0, confidence: 0, ready: false });
+  const [aiTestLabel, setAiTestLabel] = useState("Step 1: カメラ確認");
 
   const ballIdRef = useRef(1);
   const lastTickRef = useRef(Date.now());
@@ -252,10 +265,18 @@ export default function App() {
   const footDistanceLabel = Number.isFinite(footBallDistance) ? `${Math.round(footBallDistance)}px` : "--";
   const footInputLabel = footInputStatus.source === "AI" ? "AUTO" : "TOUCH";
   const cameraStatusLabel = footAssistEnabled ? "FOOT READY" : "CAMERA SAFE";
+  const VisionTestCamera = useMemo<OnDeviceVisionCameraProbeComponent | null>(() => {
+    if (screen !== "aiTest" || aiTestStage !== "vision") return null;
+    return require("./components/OnDeviceVisionCameraProbe").OnDeviceVisionCameraProbe;
+  }, [aiTestStage, screen]);
+  const ModelTestProbe = useMemo<OnDeviceTfliteModelProbeComponent | null>(() => {
+    if (screen !== "aiTest" || aiTestStage !== "model") return null;
+    return require("./components/OnDeviceTfliteModelProbe").OnDeviceTfliteModelProbe;
+  }, [aiTestStage, screen]);
   const AiTestCamera = useMemo<OnDeviceVolleyCameraComponent | null>(() => {
-    if (screen !== "aiTest" || !aiTestInferenceEnabled) return null;
+    if (screen !== "aiTest" || aiTestStage !== "inference") return null;
     return require("./components/OnDeviceVolleyCamera").OnDeviceVolleyCamera;
-  }, [aiTestInferenceEnabled, screen]);
+  }, [aiTestStage, screen]);
 
   useEffect(() => {
     if (fieldSize.width <= 0 || fieldSize.height <= 0 || footTracker.ready) return;
@@ -312,9 +333,10 @@ export default function App() {
   };
 
   const startAiFootTest = async () => {
-    setAiTestInferenceEnabled(false);
+    setAiTestStage("preview");
     setAiTestStatus(initialFootInputStatus);
     setAiTestFoot({ x: 0, y: 0, confidence: 0, ready: false });
+    setAiTestLabel("Step 1: カメラ確認");
     if (!cameraPermission?.granted && cameraPermission?.canAskAgain !== false) {
       await requestCameraPermission();
     }
@@ -750,17 +772,17 @@ export default function App() {
               <View>
                 <Text style={styles.cameraTitle}>AI足認識テスト</Text>
                 <Text style={styles.cameraStatus}>
-                  {aiTestInferenceEnabled
+                  {aiTestStage === "inference"
                     ? aiTestStatus.aiReady
                       ? `推論中 / ${Math.round(aiTestStatus.confidence * 100)}%`
                       : aiTestStatus.error ?? "AI推論を初期化中"
-                    : "Step 1: カメラ確認 / Step 2: AI推論開始"}
+                    : aiTestLabel}
                 </Text>
               </View>
               <Pressable
                 style={styles.headerButton}
                 onPress={() => {
-                  setAiTestInferenceEnabled(false);
+                  setAiTestStage("preview");
                   setScreen("home");
                 }}
               >
@@ -777,7 +799,30 @@ export default function App() {
             >
               {cameraPermission?.granted ? (
                 <>
-                  {AiTestCamera && fieldSize.width > 0 && fieldSize.height > 0 ? (
+                  {VisionTestCamera && fieldSize.width > 0 && fieldSize.height > 0 ? (
+                    <VisionTestCamera
+                      width={fieldSize.width}
+                      height={fieldSize.height}
+                      onStatus={(status) => setAiTestLabel(`Step 1 OK: ${status}`)}
+                    />
+                  ) : ModelTestProbe && fieldSize.width > 0 && fieldSize.height > 0 ? (
+                    <ModelTestProbe
+                      width={fieldSize.width}
+                      height={fieldSize.height}
+                      modelAsset={blazePoseLiteModel}
+                      onStatus={(status) => {
+                        setAiTestLabel(
+                          status.ready ? "Step 2 OK: TFLiteモデル読込完了" : `Step 2: ${status.error ?? status.label}`,
+                        );
+                        setAiTestStatus((current) => ({
+                          ...current,
+                          aiReady: status.ready,
+                          confidence: status.ready ? 1 : 0,
+                          error: status.error,
+                        }));
+                      }}
+                    />
+                  ) : AiTestCamera && fieldSize.width > 0 && fieldSize.height > 0 ? (
                     <AiTestCamera
                       width={fieldSize.width}
                       height={fieldSize.height}
@@ -807,7 +852,7 @@ export default function App() {
                     <CameraView style={styles.cameraPreview} facing="front">
                       <View style={styles.cameraOverlay}>
                         <Text style={styles.cameraOverlayText}>
-                          カメラが映ったら AI推論開始 を押してください。通常プレイとは分離しているため、ここで足認識だけ検証できます。
+                          まず VisionCamera確認、次に TFLiteモデル確認、最後に 足推論開始 の順で試してください。
                         </Text>
                       </View>
                     </CameraView>
@@ -840,21 +885,55 @@ export default function App() {
 
             <View style={styles.cameraFooter}>
               <Text style={styles.cameraHint}>
-                このテストは端末内だけで処理します。映像フレームは外部送信しません。
+                段階ごとに試します。落ちたボタン名が原因箇所です。映像フレームは外部送信しません。
               </Text>
               {cameraPermission?.granted && (
-                <Pressable
-                  style={[styles.cameraStartButton, aiTestInferenceEnabled && styles.cameraStartButtonActive]}
-                  onPress={() => {
-                    setAiTestFoot({ x: 0, y: 0, confidence: 0, ready: false });
-                    setAiTestStatus(initialFootInputStatus);
-                    setAiTestInferenceEnabled((value) => !value);
-                  }}
-                >
-                  <Text style={styles.cameraStartText}>
-                    {aiTestInferenceEnabled ? "AI推論停止" : "AI推論開始"}
-                  </Text>
-                </Pressable>
+                <View style={styles.aiTestControls}>
+                  <Pressable
+                    style={[styles.aiTestStepButton, aiTestStage === "vision" && styles.cameraStartButtonActive]}
+                    onPress={() => {
+                      setAiTestFoot({ x: 0, y: 0, confidence: 0, ready: false });
+                      setAiTestStatus(initialFootInputStatus);
+                      setAiTestLabel("Step 1: VisionCamera 起動中");
+                      setAiTestStage("vision");
+                    }}
+                  >
+                    <Text style={styles.cameraStartText}>1 Vision確認</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.aiTestStepButton, aiTestStage === "model" && styles.cameraStartButtonActive]}
+                    onPress={() => {
+                      setAiTestFoot({ x: 0, y: 0, confidence: 0, ready: false });
+                      setAiTestStatus(initialFootInputStatus);
+                      setAiTestLabel("Step 2: TFLiteモデル読込中");
+                      setAiTestStage("model");
+                    }}
+                  >
+                    <Text style={styles.cameraStartText}>2 モデル確認</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.aiTestStepButton, aiTestStage === "inference" && styles.cameraStartButtonActive]}
+                    onPress={() => {
+                      setAiTestFoot({ x: 0, y: 0, confidence: 0, ready: false });
+                      setAiTestStatus(initialFootInputStatus);
+                      setAiTestLabel("Step 3: 足推論を初期化中");
+                      setAiTestStage("inference");
+                    }}
+                  >
+                    <Text style={styles.cameraStartText}>3 足推論</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.aiTestStepButton}
+                    onPress={() => {
+                      setAiTestStage("preview");
+                      setAiTestFoot({ x: 0, y: 0, confidence: 0, ready: false });
+                      setAiTestStatus(initialFootInputStatus);
+                      setAiTestLabel("Step 1: カメラ確認");
+                    }}
+                  >
+                    <Text style={styles.cameraStartText}>停止</Text>
+                  </Pressable>
+                </View>
               )}
             </View>
           </View>
@@ -1729,6 +1808,21 @@ const styles = StyleSheet.create({
     color: "#00D9FF",
     fontSize: 12,
     fontWeight: "900",
+  },
+  aiTestControls: {
+    flexDirection: "row",
+    gap: 6,
+    marginTop: 6,
+  },
+  aiTestStepButton: {
+    flex: 1,
+    minHeight: 34,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,217,255,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(0,217,255,0.45)",
   },
   aiFootDot: {
     position: "absolute",
