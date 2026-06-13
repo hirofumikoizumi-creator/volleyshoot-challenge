@@ -138,6 +138,10 @@ export function OnDeviceVolleyCamera({
       }
 
       const landmarks = new Float32Array(landmarkBuffer);
+      if (landmarks.length < 33 * LANDMARK_STRIDE) {
+        reportStatus(true, 0, "landmarks-short");
+        return;
+      }
       const leftFoot = contactFromSide(landmarks, LEFT_ANKLE, LEFT_HEEL, LEFT_FOOT_INDEX);
       const rightFoot = contactFromSide(landmarks, RIGHT_ANKLE, RIGHT_HEEL, RIGHT_FOOT_INDEX);
       const bestFoot =

@@ -205,6 +205,7 @@ export default function App() {
   const [recognitionRange, setRecognitionRange] = useState<RecognitionRange>("LOWER_BODY");
   const [footTracker, setFootTracker] = useState<FootTracker>(initialFootTracker);
   const [footInputStatus, setFootInputStatus] = useState<FootInputStatus>(initialFootInputStatus);
+  const [aiCameraEnabled, setAiCameraEnabled] = useState(false);
 
   const ballIdRef = useRef(1);
   const lastTickRef = useRef(Date.now());
@@ -240,7 +241,7 @@ export default function App() {
   const swingReadiness = Math.min(100, Math.round((footTracker.speed / AUTO_KICK_SPEED_THRESHOLD) * 100));
   const footDistanceLabel = Number.isFinite(footBallDistance) ? `${Math.round(footBallDistance)}px` : "--";
   const footInputLabel = footInputStatus.source === "AI" ? "AUTO" : "TOUCH";
-  const aiStatusLabel = footInputStatus.aiReady ? "AI FOOT" : "AI LOADING";
+  const aiStatusLabel = aiCameraEnabled ? (footInputStatus.aiReady ? "AI FOOT" : "AI LOADING") : "SAFE CAMERA";
 
   useEffect(() => {
     if (fieldSize.width <= 0 || fieldSize.height <= 0 || footTracker.ready) return;
@@ -264,6 +265,7 @@ export default function App() {
     setMessage(nextMessage);
     setFootTracker(initialFootTracker);
     setFootInputStatus(initialFootInputStatus);
+    setAiCameraEnabled(false);
     footTrackerRef.current = initialFootTracker;
     elapsedRef.current = 0;
     spawnElapsedRef.current = nextConfig.spawnMs;
@@ -723,7 +725,7 @@ export default function App() {
                 setFieldSize({ width, height });
               }}
             >
-              {fieldSize.width > 0 && fieldSize.height > 0 ? (
+              {aiCameraEnabled && fieldSize.width > 0 && fieldSize.height > 0 ? (
                 <OnDeviceVolleyCamera
                   width={fieldSize.width}
                   height={fieldSize.height}
@@ -753,7 +755,9 @@ export default function App() {
                   <Text style={styles.aiStatusText}>
                     {aiStatusLabel} {Math.round(footInputStatus.confidence * 100)}%
                   </Text>
-                  <Text style={styles.aiStatusSubText}>{footInputLabel} / {isFootNearBall ? "BALL IN" : "TRACKING"}</Text>
+                  <Text style={styles.aiStatusSubText}>
+                    {aiCameraEnabled ? footInputLabel : "TOUCH READY"} / {isFootNearBall ? "BALL IN" : "TRACKING"}
+                  </Text>
                 </View>
                 <View style={styles.volleyTuningPanel}>
                   <View style={styles.tuningRow}>
@@ -828,6 +832,24 @@ export default function App() {
                 <View style={styles.cameraPlayControls}>
                   <Pressable style={styles.cameraPlayMiniButton} onPress={() => setIsPaused((value) => !value)}>
                     <Text style={styles.cameraPlayMiniText}>{isPaused ? "再開" : "停止"}</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.cameraPlayMiniButton, aiCameraEnabled && styles.cameraPlayMiniButtonActive]}
+                    onPress={() => {
+                      const nextEnabled = !aiCameraEnabled;
+                      setAiCameraEnabled(nextEnabled);
+                      setFootInputStatus((current) => ({
+                        ...current,
+                        aiReady: false,
+                        confidence: 0,
+                        source: nextEnabled ? current.source : "MANUAL",
+                        error: undefined,
+                      }));
+                    }}
+                  >
+                    <Text style={[styles.cameraPlayMiniText, aiCameraEnabled && styles.cameraPlayMiniTextActive]}>
+                      {aiCameraEnabled ? "AI停止" : "AI開始"}
+                    </Text>
                   </Pressable>
                   <Pressable style={styles.cameraPlayShotButton} onPress={shoot}>
                     <Text style={styles.cameraPlayShotText}>SHOT</Text>
@@ -1692,10 +1714,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.16)",
   },
+  cameraPlayMiniButtonActive: {
+    backgroundColor: "rgba(163,255,18,0.2)",
+    borderColor: "rgba(163,255,18,0.46)",
+  },
   cameraPlayMiniText: {
     color: "#DCE7F3",
     fontSize: 12,
     fontWeight: "900",
+  },
+  cameraPlayMiniTextActive: {
+    color: "#A3FF12",
   },
   cameraPlayShotButton: {
     flex: 1.45,
