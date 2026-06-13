@@ -19,7 +19,8 @@ const INPUT_HEIGHT = 96;
 const GRID_COLUMNS = 16;
 const GRID_ROWS = 12;
 const GRID_CELL_COUNT = GRID_COLUMNS * GRID_ROWS;
-const FOOT_START_ROW = 5;
+const FOOT_START_ROW = 7;
+const MIN_LOCAL_FOOT_MOTION = 4.2;
 
 function clamp01(value: number) {
   "worklet";
@@ -50,7 +51,13 @@ function detectFootCandidate(input: Uint8Array, previousCells: number[], previou
   let bestX = 0.5;
   let bestY = 0.78;
   let bestMotion = 0;
+  let lowerMotionTotal = 0;
+  let lowerMotionCells = 0;
   const nextCells = new Array(GRID_CELL_COUNT).fill(0);
+  const cellBrightness = new Array(GRID_CELL_COUNT).fill(0);
+  const cellMotion = new Array(GRID_CELL_COUNT).fill(0);
+  const cellDarkness = new Array(GRID_CELL_COUNT).fill(0);
+  const cellContrast = new Array(GRID_CELL_COUNT).fill(0);
   const cellWidth = Math.floor(INPUT_WIDTH / GRID_COLUMNS);
   const cellHeight = Math.floor(INPUT_HEIGHT / GRID_ROWS);
 
@@ -83,17 +90,46 @@ function detectFootCandidate(input: Uint8Array, previousCells: number[], previou
       const previousBrightness = previousCells[cellIndex] ?? averageBrightness;
       const motion = Math.abs(averageBrightness - previousBrightness);
       nextCells[cellIndex] = averageBrightness;
+      cellBrightness[cellIndex] = averageBrightness;
+      cellMotion[cellIndex] = motion;
+      cellDarkness[cellIndex] = darkness / samples;
+      cellContrast[cellIndex] = contrast / samples;
+      lowerMotionTotal += motion;
+      lowerMotionCells += 1;
+    }
+  }
+
+  const averageLowerMotion = lowerMotionCells > 0 ? lowerMotionTotal / lowerMotionCells : 0;
+
+  for (let row = FOOT_START_ROW; row < GRID_ROWS; row += 1) {
+    for (let column = 0; column < GRID_COLUMNS; column += 1) {
+      const startX = column * cellWidth;
+      const startY = row * cellHeight;
+      const endX = Math.min(INPUT_WIDTH - 1, startX + cellWidth);
+      const endY = Math.min(INPUT_HEIGHT - 1, startY + cellHeight);
+      const cellIndex = row * GRID_COLUMNS + column;
+      const motion = cellMotion[cellIndex] ?? 0;
 
       const normalizedX = (startX + endX) / 2 / INPUT_WIDTH;
       const normalizedY = (startY + endY) / 2 / INPUT_HEIGHT;
-      const lowerBias = 0.72 + row / GRID_ROWS;
-      const sidePenalty = 1 - Math.abs(normalizedX - 0.5) * 0.18;
+      const bottomBias = 0.75 + Math.pow(row / (GRID_ROWS - 1), 2) * 1.35;
+      const sidePenalty = 1 - Math.abs(normalizedX - 0.5) * 0.08;
       const continuity = previousCandidate.confidence > 0
-        ? Math.max(0.72, 1 - Math.hypot(normalizedX - previousCandidate.x, normalizedY - previousCandidate.y) * 0.8)
-        : 0.86;
-      const motionScore = Math.min(90, motion * 4.6);
-      const appearanceScore = (darkness / samples) * 0.42 + (contrast / samples) * 0.24;
-      const score = (motionScore * 0.64 + appearanceScore * 0.36) * lowerBias * sidePenalty * continuity;
+        ? Math.max(0.5, 1 - Math.hypot(normalizedX - previousCandidate.x, normalizedY - previousCandidate.y) * 1.15)
+        : 0.78;
+      const localProminence = averageLowerMotion > 0 ? motion / averageLowerMotion : 0;
+      const prominenceScore = Math.min(80, Math.max(0, localProminence - 0.85) * 38);
+      const motionScore = Math.min(100, Math.max(0, motion - 2.4) * 8.2);
+      const appearanceScore = (cellDarkness[cellIndex] ?? 0) * 0.22 + (cellContrast[cellIndex] ?? 0) * 0.18;
+      const rowGate = normalizedY >= 0.58 ? 1 : 0.35;
+      const motionGate = motion >= MIN_LOCAL_FOOT_MOTION ? 1 : 0.18;
+      const score =
+        (motionScore * 0.58 + prominenceScore * 0.27 + appearanceScore * 0.15) *
+        bottomBias *
+        sidePenalty *
+        continuity *
+        rowGate *
+        motionGate;
 
       if (score > bestScore) {
         bestScore = score;
@@ -104,18 +140,18 @@ function detectFootCandidate(input: Uint8Array, previousCells: number[], previou
     }
   }
 
-  if (bestScore <= 0 && previousCandidate.confidence > 0.08) {
+  if ((bestScore <= 0 || bestMotion < MIN_LOCAL_FOOT_MOTION) && previousCandidate.confidence > 0.08) {
     return {
       candidate: {
         x: previousCandidate.x,
         y: previousCandidate.y,
-        confidence: previousCandidate.confidence * 0.72,
+        confidence: previousCandidate.confidence * 0.58,
       },
       cells: nextCells,
     };
   }
 
-  const rawConfidence = bestMotion < 3 ? bestScore / 190 : bestScore / 135;
+  const rawConfidence = bestMotion < MIN_LOCAL_FOOT_MOTION ? bestScore / 280 : bestScore / 120;
   return {
     candidate: {
       x: clamp01(bestX),
