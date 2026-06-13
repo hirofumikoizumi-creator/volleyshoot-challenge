@@ -16,7 +16,7 @@ type Screen = "home" | "rules" | "play" | "result" | "camera" | "cameraPlay" | "
 type BallType = "NORMAL" | "BLUE" | "GOLD";
 type ShotResult = "PERFECT" | "GOOD" | "MISS" | "AVOID";
 type RecognitionRange = "FULL_BODY" | "LOWER_BODY" | "FEET";
-type AiTestStage = "preview" | "vision" | "model" | "inference";
+type AiTestStage = "preview" | "vision" | "model" | "frame" | "resize" | "inference";
 type OnDeviceVolleyCameraComponent = React.ComponentType<{
   width: number;
   height: number;
@@ -35,6 +35,11 @@ type OnDeviceTfliteModelProbeComponent = React.ComponentType<{
   height: number;
   modelAsset?: number;
   onStatus?: (status: { ready: boolean; label: string; error?: string }) => void;
+}>;
+type OnDeviceFrameProcessorProbeComponent = React.ComponentType<{
+  width: number;
+  height: number;
+  onStatus?: (status: string) => void;
 }>;
 
 type Ball = {
@@ -272,6 +277,14 @@ export default function App() {
   const ModelTestProbe = useMemo<OnDeviceTfliteModelProbeComponent | null>(() => {
     if (screen !== "aiTest" || aiTestStage !== "model") return null;
     return require("./components/OnDeviceTfliteModelProbe").OnDeviceTfliteModelProbe;
+  }, [aiTestStage, screen]);
+  const FrameTestProbe = useMemo<OnDeviceFrameProcessorProbeComponent | null>(() => {
+    if (screen !== "aiTest" || aiTestStage !== "frame") return null;
+    return require("./components/OnDeviceFrameProcessorProbe").OnDeviceFrameProcessorProbe;
+  }, [aiTestStage, screen]);
+  const ResizeTestProbe = useMemo<OnDeviceFrameProcessorProbeComponent | null>(() => {
+    if (screen !== "aiTest" || aiTestStage !== "resize") return null;
+    return require("./components/OnDeviceResizeProbe").OnDeviceResizeProbe;
   }, [aiTestStage, screen]);
   const AiTestCamera = useMemo<OnDeviceVolleyCameraComponent | null>(() => {
     if (screen !== "aiTest" || aiTestStage !== "inference") return null;
@@ -822,6 +835,18 @@ export default function App() {
                         }));
                       }}
                     />
+                  ) : FrameTestProbe && fieldSize.width > 0 && fieldSize.height > 0 ? (
+                    <FrameTestProbe
+                      width={fieldSize.width}
+                      height={fieldSize.height}
+                      onStatus={(status) => setAiTestLabel(`Step 3: ${status}`)}
+                    />
+                  ) : ResizeTestProbe && fieldSize.width > 0 && fieldSize.height > 0 ? (
+                    <ResizeTestProbe
+                      width={fieldSize.width}
+                      height={fieldSize.height}
+                      onStatus={(status) => setAiTestLabel(`Step 4: ${status}`)}
+                    />
                   ) : AiTestCamera && fieldSize.width > 0 && fieldSize.height > 0 ? (
                     <AiTestCamera
                       width={fieldSize.width}
@@ -852,7 +877,7 @@ export default function App() {
                     <CameraView style={styles.cameraPreview} facing="front">
                       <View style={styles.cameraOverlay}>
                         <Text style={styles.cameraOverlayText}>
-                          まず VisionCamera確認、次に TFLiteモデル確認、最後に 足推論開始 の順で試してください。
+                          Vision、モデル、FrameProcessor、Resize、足推論の順で試してください。
                         </Text>
                       </View>
                     </CameraView>
@@ -912,15 +937,37 @@ export default function App() {
                     <Text style={styles.cameraStartText}>2 モデル確認</Text>
                   </Pressable>
                   <Pressable
+                    style={[styles.aiTestStepButton, aiTestStage === "frame" && styles.cameraStartButtonActive]}
+                    onPress={() => {
+                      setAiTestFoot({ x: 0, y: 0, confidence: 0, ready: false });
+                      setAiTestStatus(initialFootInputStatus);
+                      setAiTestLabel("Step 3: FrameProcessor 起動中");
+                      setAiTestStage("frame");
+                    }}
+                  >
+                    <Text style={styles.cameraStartText}>3 Frame</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.aiTestStepButton, aiTestStage === "resize" && styles.cameraStartButtonActive]}
+                    onPress={() => {
+                      setAiTestFoot({ x: 0, y: 0, confidence: 0, ready: false });
+                      setAiTestStatus(initialFootInputStatus);
+                      setAiTestLabel("Step 4: Resize 起動中");
+                      setAiTestStage("resize");
+                    }}
+                  >
+                    <Text style={styles.cameraStartText}>4 Resize</Text>
+                  </Pressable>
+                  <Pressable
                     style={[styles.aiTestStepButton, aiTestStage === "inference" && styles.cameraStartButtonActive]}
                     onPress={() => {
                       setAiTestFoot({ x: 0, y: 0, confidence: 0, ready: false });
                       setAiTestStatus(initialFootInputStatus);
-                      setAiTestLabel("Step 3: 足推論を初期化中");
+                      setAiTestLabel("Step 5: 足推論を初期化中");
                       setAiTestStage("inference");
                     }}
                   >
-                    <Text style={styles.cameraStartText}>3 足推論</Text>
+                    <Text style={styles.cameraStartText}>5 推論</Text>
                   </Pressable>
                   <Pressable
                     style={styles.aiTestStepButton}
@@ -1811,11 +1858,13 @@ const styles = StyleSheet.create({
   },
   aiTestControls: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 6,
     marginTop: 6,
   },
   aiTestStepButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: "30%",
     minHeight: 34,
     borderRadius: 8,
     alignItems: "center",
