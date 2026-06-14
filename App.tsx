@@ -621,7 +621,7 @@ export default function App() {
     fallbackY: number,
     now: number,
   ): FootTracker => {
-    if (!point || point.confidence < 0.08) {
+    if (!point) {
       return {
         ...previous,
         x: previous.ready ? previous.x : fallbackX,
@@ -1105,13 +1105,11 @@ export default function App() {
                   width={fieldSize.width}
                   height={fieldSize.height}
                   modelAsset={moveNetLightningModel}
-                  onFootDetected={(point) => registerFootPosition(point.x, point.y, "AI", point.confidence)}
                   onFeetDetected={registerFeetPositions}
                   onInferenceStatus={(status) => {
                     setFootInputStatus((current) => ({
                       ...current,
-                      source: status.ready ? "AI" : current.source,
-                      confidence: status.confidence,
+                      source: current.source === "AI" || status.ready ? "AI" : current.source,
                       aiReady: status.ready,
                       error: status.error,
                     }));
@@ -1186,8 +1184,8 @@ export default function App() {
 
                 {(["left", "right"] as const).map((side) => {
                   const foot = feetTrackers[side];
-                  const isLocked = foot.ready && foot.confidence >= 0.08 && Date.now() - foot.lastTs < 1100;
-                  if (!hasFootLock || !isLocked) return null;
+                  if (!foot.ready || Date.now() - foot.lastTs > 1600) return null;
+                  const markerOpacity = Math.max(0.26, Math.min(0.95, 0.28 + foot.confidence * 1.7));
                   return (
                     <View
                       key={side}
@@ -1200,11 +1198,14 @@ export default function App() {
                           width: footReach.marker * 2,
                           height: footReach.marker * 1.18,
                           borderRadius: footReach.marker,
+                          opacity: markerOpacity,
                           transform: [{ rotate: `${Math.max(-34, Math.min(34, foot.speed * 18))}deg` }],
                         },
                       ]}
                     >
-                      <Text style={styles.footMarkerText}>{side === "left" ? "L FOOT" : "R FOOT"}</Text>
+                      <Text style={styles.footMarkerText}>
+                        {side === "left" ? "L" : "R"} {Math.round(foot.confidence * 100)}
+                      </Text>
                     </View>
                   );
                 })}

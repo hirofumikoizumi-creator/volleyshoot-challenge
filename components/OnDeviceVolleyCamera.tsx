@@ -232,12 +232,13 @@ export function OnDeviceVolleyCamera({
       rightConfidence: number,
     ) => {
       onFeetDetected?.({
-        left: leftConfidence >= FOOT_REPORT_THRESHOLD ? { x: leftX, y: leftY, confidence: leftConfidence } : undefined,
-        right: rightConfidence >= FOOT_REPORT_THRESHOLD ? { x: rightX, y: rightY, confidence: rightConfidence } : undefined,
+        left: { x: leftX, y: leftY, confidence: leftConfidence },
+        right: { x: rightX, y: rightY, confidence: rightConfidence },
       });
     },
     [onFeetDetected],
   );
+  const hasFeetReporter = useSharedValue(Boolean(onFeetDetected));
   const reportStatus = useRunOnJS((ready: boolean, confidence: number, error?: string) => {
     onInferenceStatus?.({ ready, confidence, error });
   }, [onInferenceStatus]);
@@ -245,6 +246,10 @@ export function OnDeviceVolleyCamera({
   useEffect(() => {
     onInferenceStatus?.({ ready: true, confidence: 0 });
   }, [onInferenceStatus]);
+
+  useEffect(() => {
+    hasFeetReporter.value = Boolean(onFeetDetected);
+  }, [hasFeetReporter, onFeetDetected]);
 
   useEffect(() => {
     if (!hasPermission) {
@@ -287,10 +292,10 @@ export function OnDeviceVolleyCamera({
       const confidence = Math.max(left.confidence, right.confidence);
       reportStatus(true, confidence);
       reportFeet(left.x * width, left.y * height, left.confidence, right.x * width, right.y * height, right.confidence);
-      if (confidence < FOOT_REPORT_THRESHOLD) return;
+      if (hasFeetReporter.value || confidence < FOOT_REPORT_THRESHOLD) return;
       reportFoot(best.x * width, best.y * height, best.confidence);
     });
-  }, [previousLeftCandidate, previousRightCandidate, previousCells, reportFeet, reportFoot, reportStatus, resize, width, height]);
+  }, [hasFeetReporter, previousLeftCandidate, previousRightCandidate, previousCells, reportFeet, reportFoot, reportStatus, resize, width, height]);
 
   if (!hasPermission) {
     return (
