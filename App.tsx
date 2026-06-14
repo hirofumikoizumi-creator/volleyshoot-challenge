@@ -62,6 +62,8 @@ type Ball = {
 type FootTracker = {
   x: number;
   y: number;
+  hitX: number;
+  hitY: number;
   vx: number;
   vy: number;
   speed: number;
@@ -170,6 +172,8 @@ const recognitionLabels: Record<RecognitionRange, { label: string; status: strin
 const initialFootTracker: FootTracker = {
   x: 180,
   y: 380,
+  hitX: 180,
+  hitY: 380,
   vx: 0,
   vy: 0,
   speed: 0,
@@ -184,12 +188,12 @@ const initialFootInputStatus: FootInputStatus = {
   lastDetectedAt: 0,
 };
 const moveNetLightningModel = require("./assets/models/movenet_singlepose_lightning_int8.tflite");
-const AUTO_KICK_SPEED_THRESHOLD = 0.62;
+const AUTO_KICK_SPEED_THRESHOLD = 0.48;
 const AUTO_KICK_COOLDOWN_MS = 220;
-const AUTO_KICK_DISTANCE_BUFFER = 1.18;
+const AUTO_KICK_DISTANCE_BUFFER = 1.22;
 const FOOT_VELOCITY_WINDOW_MS = 130;
 const FOOT_MAX_EXTRAPOLATION_MS = 140;
-const FOOT_TRACKING_LATENCY_MS = 72;
+const FOOT_TRACKING_LATENCY_MS = 104;
 
 function fitFootVelocityLeastSquares(samples: FootHistorySample[]) {
   if (samples.length < 3) return { vx: 0, vy: 0, speed: 0 };
@@ -329,7 +333,7 @@ export default function App() {
   }, [fieldSize]);
 
   const accuracy = stats.shots === 0 ? 0 : Math.round((stats.hits / stats.shots) * 100);
-  const footBallDistance = footTracker.ready ? nearestBallDistance(footTracker) : Infinity;
+  const footBallDistance = footTracker.ready ? nearestBallDistance({ x: footTracker.hitX, y: footTracker.hitY }) : Infinity;
   const isFootNearBall = Number.isFinite(footBallDistance) && footBallDistance <= footReach.good * AUTO_KICK_DISTANCE_BUFFER;
   const swingReadiness = Math.min(100, Math.round((footTracker.speed / AUTO_KICK_SPEED_THRESHOLD) * 100));
   const footDistanceLabel = Number.isFinite(footBallDistance) ? `${Math.round(footBallDistance)}px` : "--";
@@ -376,6 +380,8 @@ export default function App() {
       ...footTrackerRef.current,
       x: fieldSize.width * 0.5,
       y: fieldSize.height * 0.76,
+      hitX: fieldSize.width * 0.5,
+      hitY: fieldSize.height * 0.76,
       ready: true,
     };
     const nextFeet = {
@@ -507,7 +513,7 @@ export default function App() {
       elapsedRef.current += deltaMs;
       spawnElapsedRef.current += deltaMs;
 
-      if (spawnElapsedRef.current >= config.spawnMs) {
+      if (spawnElapsedRef.current >= config.spawnMs && fieldSize.width > 0 && fieldSize.height > 0) {
         spawnElapsedRef.current = 0;
         spawnBall();
       }
@@ -651,6 +657,8 @@ export default function App() {
     const next = {
       x: smoothedX,
       y: smoothedY,
+      hitX: smoothedX,
+      hitY: smoothedY,
       vx: dx / elapsed,
       vy: dy / elapsed,
       speed,
@@ -674,10 +682,10 @@ export default function App() {
       screen === "cameraPlay" &&
       speed > AUTO_KICK_SPEED_THRESHOLD &&
       now - lastAutoKickRef.current > AUTO_KICK_COOLDOWN_MS &&
-      hasVolleyCandidate(next, footReach.good)
+      hasVolleyCandidate({ x: next.hitX, y: next.hitY }, footReach.good)
     ) {
       lastAutoKickRef.current = now;
-      shootAt(next, footReach.good, footReach.perfect, "foot");
+      shootAt({ x: next.hitX, y: next.hitY }, footReach.good, footReach.perfect, "foot");
     }
   };
 
@@ -695,6 +703,8 @@ export default function App() {
         ...previous,
         x: previous.ready ? previous.x + previous.vx * elapsed : fallbackX,
         y: previous.ready ? previous.y + previous.vy * elapsed : fallbackY,
+        hitX: previous.ready ? previous.hitX : fallbackX,
+        hitY: previous.ready ? previous.hitY : fallbackY,
         vx: previous.vx * 0.82,
         vy: previous.vy * 0.82,
         speed: previous.speed * 0.82,
@@ -713,9 +723,24 @@ export default function App() {
     const velocity = fitFootVelocityLeastSquares(history);
     const filtered = footFiltersRef.current[side].filter({ x: point.x, y: point.y, visibility: point.confidence }, now);
     const lookaheadMs = Math.min(FOOT_MAX_EXTRAPOLATION_MS, FOOT_TRACKING_LATENCY_MS + 1000 / 24);
+    const deceleration = velocity.speed < previous.speed
+      ? Math.max(0.35, Math.min(1, 1 - (previous.speed - velocity.speed) * 0.85))
+      : 1;
+    let dx = velocity.vx * lookaheadMs * deceleration;
+    let dy = velocity.vy * lookaheadMs * deceleration;
+    const extrapolation = Math.hypot(dx, dy);
+    const maxExtrapolationPx = footReach.marker * 2.5;
+    if (extrapolation > maxExtrapolationPx && extrapolation > 0) {
+      const scale = maxExtrapolationPx / extrapolation;
+      dx *= scale;
+      dy *= scale;
+    }
+
     return {
-      x: filtered.x + velocity.vx * lookaheadMs,
-      y: filtered.y + velocity.vy * lookaheadMs,
+      x: filtered.x + dx,
+      y: filtered.y + dy,
+      hitX: filtered.x,
+      hitY: filtered.y,
       vx: velocity.vx,
       vy: velocity.vy,
       speed: velocity.speed,
@@ -755,11 +780,11 @@ export default function App() {
       active.ready &&
       active.speed > AUTO_KICK_SPEED_THRESHOLD &&
       active.confidence >= 0.08 &&
-      hasVolleyCandidate(active, footReach.good) &&
+      hasVolleyCandidate({ x: active.hitX, y: active.hitY }, footReach.good) &&
       now - lastAutoKickRef.current > AUTO_KICK_COOLDOWN_MS
     ) {
       lastAutoKickRef.current = now;
-      shootAt(active, footReach.good, footReach.perfect, "foot");
+      shootAt({ x: active.hitX, y: active.hitY }, footReach.good, footReach.perfect, "foot");
     }
   };
 
