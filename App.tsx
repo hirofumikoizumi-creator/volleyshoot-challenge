@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import { OneEuroPointFilter } from "./lib/pose/one-euro-filter";
 
 type Difficulty = "EASY" | "NORMAL" | "HARD";
 type Screen = "home" | "rules" | "play" | "result" | "camera" | "cameraPlay" | "aiTest";
@@ -61,10 +62,17 @@ type Ball = {
 type FootTracker = {
   x: number;
   y: number;
+  vx: number;
+  vy: number;
   speed: number;
   confidence: number;
   ready: boolean;
   lastTs: number;
+};
+type FootSide = "left" | "right";
+type FootHistorySample = {
+  point: { x: number; y: number };
+  timestampMs: number;
 };
 type FootInputSource = "AI" | "MANUAL";
 type FootInputStatus = {
@@ -162,6 +170,8 @@ const recognitionLabels: Record<RecognitionRange, { label: string; status: strin
 const initialFootTracker: FootTracker = {
   x: 180,
   y: 380,
+  vx: 0,
+  vy: 0,
   speed: 0,
   confidence: 0,
   ready: false,
@@ -177,6 +187,39 @@ const moveNetLightningModel = require("./assets/models/movenet_singlepose_lightn
 const AUTO_KICK_SPEED_THRESHOLD = 0.62;
 const AUTO_KICK_COOLDOWN_MS = 220;
 const AUTO_KICK_DISTANCE_BUFFER = 1.18;
+const FOOT_VELOCITY_WINDOW_MS = 130;
+const FOOT_MAX_EXTRAPOLATION_MS = 140;
+const FOOT_TRACKING_LATENCY_MS = 72;
+
+function fitFootVelocityLeastSquares(samples: FootHistorySample[]) {
+  if (samples.length < 3) return { vx: 0, vy: 0, speed: 0 };
+
+  const t0 = samples[0].timestampMs;
+  let sumT = 0;
+  let sumTT = 0;
+  let sumX = 0;
+  let sumY = 0;
+  let sumTX = 0;
+  let sumTY = 0;
+
+  for (const sample of samples) {
+    const t = sample.timestampMs - t0;
+    sumT += t;
+    sumTT += t * t;
+    sumX += sample.point.x;
+    sumY += sample.point.y;
+    sumTX += t * sample.point.x;
+    sumTY += t * sample.point.y;
+  }
+
+  const n = samples.length;
+  const denom = n * sumTT - sumT * sumT;
+  if (Math.abs(denom) < 1e-6) return { vx: 0, vy: 0, speed: 0 };
+
+  const vx = (n * sumTX - sumT * sumX) / denom;
+  const vy = (n * sumTY - sumT * sumY) / denom;
+  return { vx, vy, speed: Math.hypot(vx, vy) };
+}
 
 function randomBetween(min: number, max: number) {
   return min + Math.random() * (max - min);
@@ -254,6 +297,14 @@ export default function App() {
     left: initialFootTracker,
     right: initialFootTracker,
   });
+  const footFiltersRef = useRef<Record<FootSide, OneEuroPointFilter>>({
+    left: new OneEuroPointFilter(),
+    right: new OneEuroPointFilter(),
+  });
+  const footHistoryRef = useRef<Record<FootSide, FootHistorySample[]>>({
+    left: [],
+    right: [],
+  });
   const lastAutoKickRef = useRef(0);
 
   const config = configs[difficulty];
@@ -313,6 +364,12 @@ export default function App() {
     return require("./components/OnDeviceVolleyCamera").OnDeviceVolleyCamera;
   }, [footAssistEnabled, screen]);
 
+  const resetFootProcessing = () => {
+    footFiltersRef.current.left.reset();
+    footFiltersRef.current.right.reset();
+    footHistoryRef.current = { left: [], right: [] };
+  };
+
   useEffect(() => {
     if (fieldSize.width <= 0 || fieldSize.height <= 0 || footTracker.ready) return;
     const next = {
@@ -345,6 +402,7 @@ export default function App() {
     setFootAssistEnabled(true);
     footTrackerRef.current = initialFootTracker;
     feetTrackersRef.current = { left: initialFootTracker, right: initialFootTracker };
+    resetFootProcessing();
     elapsedRef.current = 0;
     spawnElapsedRef.current = nextConfig.spawnMs;
     lastTickRef.current = Date.now();
@@ -590,7 +648,16 @@ export default function App() {
     const dx = smoothedX - previous.x;
     const dy = smoothedY - previous.y;
     const speed = Math.sqrt(dx * dx + dy * dy) / elapsed;
-    const next = { x: smoothedX, y: smoothedY, speed, confidence, ready: true, lastTs: now };
+    const next = {
+      x: smoothedX,
+      y: smoothedY,
+      vx: dx / elapsed,
+      vy: dy / elapsed,
+      speed,
+      confidence,
+      ready: true,
+      lastTs: now,
+    };
     footTrackerRef.current = next;
     setFootTracker(next);
     feetTrackersRef.current = { left: next, right: next };
@@ -615,6 +682,7 @@ export default function App() {
   };
 
   const smoothFootTracker = (
+    side: FootSide,
     previous: FootTracker,
     point: { x: number; y: number; confidence: number } | undefined,
     fallbackX: number,
@@ -622,25 +690,39 @@ export default function App() {
     now: number,
   ): FootTracker => {
     if (!point) {
+      const elapsed = Math.min(80, Math.max(16, now - (previous.lastTs || now - 16)));
       return {
         ...previous,
-        x: previous.ready ? previous.x : fallbackX,
-        y: previous.ready ? previous.y : fallbackY,
-        speed: previous.speed * 0.72,
+        x: previous.ready ? previous.x + previous.vx * elapsed : fallbackX,
+        y: previous.ready ? previous.y + previous.vy * elapsed : fallbackY,
+        vx: previous.vx * 0.82,
+        vy: previous.vy * 0.82,
+        speed: previous.speed * 0.82,
         confidence: previous.confidence * 0.72,
         ready: previous.ready && previous.confidence > 0.06,
         lastTs: previous.lastTs || now,
       };
     }
 
-    const smoothing = Math.max(0.32, Math.min(0.68, point.confidence + 0.18));
-    const baseX = previous.ready ? previous.x : point.x;
-    const baseY = previous.ready ? previous.y : point.y;
-    const x = baseX + (point.x - baseX) * smoothing;
-    const y = baseY + (point.y - baseY) * smoothing;
-    const elapsed = Math.max(16, now - (previous.lastTs || now - 16));
-    const speed = Math.hypot(x - previous.x, y - previous.y) / elapsed;
-    return { x, y, speed, confidence: point.confidence, ready: true, lastTs: now };
+    const history = footHistoryRef.current[side];
+    history.push({ point, timestampMs: now });
+    while (history.length > 0 && history[0].timestampMs < now - FOOT_VELOCITY_WINDOW_MS) {
+      history.shift();
+    }
+
+    const velocity = fitFootVelocityLeastSquares(history);
+    const filtered = footFiltersRef.current[side].filter({ x: point.x, y: point.y, visibility: point.confidence }, now);
+    const lookaheadMs = Math.min(FOOT_MAX_EXTRAPOLATION_MS, FOOT_TRACKING_LATENCY_MS + 1000 / 24);
+    return {
+      x: filtered.x + velocity.vx * lookaheadMs,
+      y: filtered.y + velocity.vy * lookaheadMs,
+      vx: velocity.vx,
+      vy: velocity.vy,
+      speed: velocity.speed,
+      confidence: point.confidence,
+      ready: true,
+      lastTs: now,
+    };
   };
 
   const registerFeetPositions = (feet: {
@@ -650,8 +732,8 @@ export default function App() {
     const now = Date.now();
     const previous = feetTrackersRef.current;
     const fallbackY = fieldSize.height > 0 ? fieldSize.height * 0.76 : initialFootTracker.y;
-    const left = smoothFootTracker(previous.left, feet.left, fieldSize.width * 0.42, fallbackY, now);
-    const right = smoothFootTracker(previous.right, feet.right, fieldSize.width * 0.58, fallbackY, now);
+    const left = smoothFootTracker("left", previous.left, feet.left, fieldSize.width * 0.42, fallbackY, now);
+    const right = smoothFootTracker("right", previous.right, feet.right, fieldSize.width * 0.58, fallbackY, now);
     const nextFeet = { left, right };
     const active = right.speed * (0.7 + right.confidence) >= left.speed * (0.7 + left.confidence) ? right : left;
 

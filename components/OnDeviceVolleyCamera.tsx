@@ -55,38 +55,17 @@ function emptyCandidate(x: number) {
   return { x, y: 0.78, confidence: 0 };
 }
 
-function decayCandidate(candidate: FootCandidate) {
-  "worklet";
-  return {
-    x: candidate.x,
-    y: candidate.y,
-    confidence: candidate.confidence * 0.76,
-  };
-}
-
-function smoothCandidate(last: FootCandidate, next: FootCandidate) {
-  "worklet";
-  const alpha = next.confidence > 0.22 ? 0.58 : 0.42;
-  return {
-    x: clamp01(last.x + (next.x - last.x) * alpha),
-    y: clamp01(last.y + (next.y - last.y) * alpha),
-    confidence: clamp01(last.confidence * 0.32 + next.confidence * 0.68),
-  };
-}
-
 function detectFootCandidates(
   input: Uint8Array,
   previousCells: number[],
-  previousLeft: FootCandidate,
-  previousRight: FootCandidate,
 ) {
   "worklet";
-  let bestLeftScore = 0;
-  let bestRightScore = 0;
-  let bestLeft = emptyCandidate(0.36);
-  let bestRight = emptyCandidate(0.64);
-  let bestLeftMotion = 0;
-  let bestRightMotion = 0;
+  let leftWeight = 0;
+  let rightWeight = 0;
+  let leftX = 0;
+  let leftY = 0;
+  let rightX = 0;
+  let rightY = 0;
   let lowerMotionTotal = 0;
   let lowerMotionCells = 0;
   const nextCells = new Array(GRID_CELL_COUNT).fill(0);
@@ -149,12 +128,8 @@ function detectFootCandidates(
       const normalizedX = (startX + endX) / 2 / INPUT_WIDTH;
       const normalizedY = (startY + endY) / 2 / INPUT_HEIGHT;
       const isLeftSide = normalizedX < 0.5;
-      const previousCandidate = isLeftSide ? previousLeft : previousRight;
       const bottomBias = 0.75 + Math.pow(row / (GRID_ROWS - 1), 2) * 1.35;
       const sidePenalty = 1 - Math.abs(normalizedX - 0.5) * 0.08;
-      const continuity = previousCandidate.confidence > 0
-        ? Math.max(0.44, 1 - Math.hypot(normalizedX - previousCandidate.x, normalizedY - previousCandidate.y) * 0.92)
-        : 0.84;
       const localProminence = averageLowerMotion > 0 ? motion / averageLowerMotion : 0;
       const prominenceScore = Math.min(80, Math.max(0, localProminence - 0.72) * 42);
       const motionScore = Math.min(100, Math.max(0, motion - 1.3) * 9.4);
@@ -165,38 +140,27 @@ function detectFootCandidates(
         (motionScore * 0.58 + prominenceScore * 0.27 + appearanceScore * 0.15) *
         bottomBias *
         sidePenalty *
-        continuity *
         rowGate *
         motionGate;
 
-      if (isLeftSide && score > bestLeftScore) {
-        bestLeftScore = score;
-        bestLeft = {
-          x: normalizedX,
-          y: normalizedY,
-          confidence: clamp01((motion < MIN_LOCAL_FOOT_MOTION ? score / 250 : score / 105)),
-        };
-        bestLeftMotion = motion;
-      }
-
-      if (!isLeftSide && score > bestRightScore) {
-        bestRightScore = score;
-        bestRight = {
-          x: normalizedX,
-          y: normalizedY,
-          confidence: clamp01((motion < MIN_LOCAL_FOOT_MOTION ? score / 250 : score / 105)),
-        };
-        bestRightMotion = motion;
+      if (isLeftSide) {
+        leftWeight += score;
+        leftX += normalizedX * score;
+        leftY += normalizedY * score;
+      } else {
+        rightWeight += score;
+        rightX += normalizedX * score;
+        rightY += normalizedY * score;
       }
     }
   }
 
-  const left = bestLeftScore <= 0 || bestLeftMotion < MIN_LOCAL_FOOT_MOTION
-    ? decayCandidate(previousLeft)
-    : bestLeft;
-  const right = bestRightScore <= 0 || bestRightMotion < MIN_LOCAL_FOOT_MOTION
-    ? decayCandidate(previousRight)
-    : bestRight;
+  const left = leftWeight > 0
+    ? { x: clamp01(leftX / leftWeight), y: clamp01(leftY / leftWeight), confidence: clamp01(leftWeight / 1200) }
+    : emptyCandidate(0.36);
+  const right = rightWeight > 0
+    ? { x: clamp01(rightX / rightWeight), y: clamp01(rightY / rightWeight), confidence: clamp01(rightWeight / 1200) }
+    : emptyCandidate(0.64);
 
   return {
     left,
@@ -217,8 +181,6 @@ export function OnDeviceVolleyCamera({
   const { hasPermission, requestPermission } = useCameraPermission();
   const { resize } = useResizePlugin();
   const previousCells = useSharedValue<number[]>(Array(GRID_CELL_COUNT).fill(0));
-  const previousLeftCandidate = useSharedValue<FootCandidate>({ x: 0.36, y: 0.78, confidence: 0 });
-  const previousRightCandidate = useSharedValue<FootCandidate>({ x: 0.64, y: 0.78, confidence: 0 });
   const reportFoot = useRunOnJS((x: number, y: number, confidence: number) => {
     onFootDetected?.({ x, y, confidence });
   }, [onFootDetected]);
@@ -261,7 +223,7 @@ export function OnDeviceVolleyCamera({
 
   const frameProcessor = useFrameProcessor((frame) => {
     "worklet";
-    runAtTargetFps(15, () => {
+    runAtTargetFps(24, () => {
       "worklet";
       const input = resize(frame, {
         scale: { width: INPUT_WIDTH, height: INPUT_HEIGHT },
@@ -275,18 +237,11 @@ export function OnDeviceVolleyCamera({
         return;
       }
 
-      const detection = detectFootCandidates(
-        input,
-        previousCells.value,
-        previousLeftCandidate.value,
-        previousRightCandidate.value,
-      );
+      const detection = detectFootCandidates(input, previousCells.value);
       previousCells.value = detection.cells;
 
-      const left = smoothCandidate(previousLeftCandidate.value, detection.left);
-      const right = smoothCandidate(previousRightCandidate.value, detection.right);
-      previousLeftCandidate.value = left;
-      previousRightCandidate.value = right;
+      const left = detection.left;
+      const right = detection.right;
 
       const best = left.confidence >= right.confidence ? left : right;
       const confidence = Math.max(left.confidence, right.confidence);
@@ -295,7 +250,7 @@ export function OnDeviceVolleyCamera({
       if (hasFeetReporter.value || confidence < FOOT_REPORT_THRESHOLD) return;
       reportFoot(best.x * width, best.y * height, best.confidence);
     });
-  }, [hasFeetReporter, previousLeftCandidate, previousRightCandidate, previousCells, reportFeet, reportFoot, reportStatus, resize, width, height]);
+  }, [hasFeetReporter, previousCells, reportFeet, reportFoot, reportStatus, resize, width, height]);
 
   if (!hasPermission) {
     return (
