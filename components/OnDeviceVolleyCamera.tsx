@@ -11,6 +11,10 @@ type OnDeviceVolleyCameraProps = {
   modelAsset?: number;
   showStatusBadge?: boolean;
   onFootDetected?: (point: { x: number; y: number; confidence: number }) => void;
+  onFeetDetected?: (feet: {
+    left?: { x: number; y: number; confidence: number };
+    right?: { x: number; y: number; confidence: number };
+  }) => void;
   onInferenceStatus?: (status: { ready: boolean; confidence: number; error?: string }) => void;
 };
 
@@ -19,8 +23,9 @@ const INPUT_HEIGHT = 96;
 const GRID_COLUMNS = 16;
 const GRID_ROWS = 12;
 const GRID_CELL_COUNT = GRID_COLUMNS * GRID_ROWS;
-const FOOT_START_ROW = 7;
-const MIN_LOCAL_FOOT_MOTION = 4.2;
+const FOOT_START_ROW = 5;
+const MIN_LOCAL_FOOT_MOTION = 2.1;
+const FOOT_REPORT_THRESHOLD = 0.1;
 
 function clamp01(value: number) {
   "worklet";
@@ -45,12 +50,43 @@ type FootCandidate = {
   confidence: number;
 };
 
-function detectFootCandidate(input: Uint8Array, previousCells: number[], previousCandidate: FootCandidate) {
+function emptyCandidate(x: number) {
   "worklet";
-  let bestScore = 0;
-  let bestX = 0.5;
-  let bestY = 0.78;
-  let bestMotion = 0;
+  return { x, y: 0.78, confidence: 0 };
+}
+
+function decayCandidate(candidate: FootCandidate) {
+  "worklet";
+  return {
+    x: candidate.x,
+    y: candidate.y,
+    confidence: candidate.confidence * 0.76,
+  };
+}
+
+function smoothCandidate(last: FootCandidate, next: FootCandidate) {
+  "worklet";
+  const alpha = next.confidence > 0.22 ? 0.58 : 0.42;
+  return {
+    x: clamp01(last.x + (next.x - last.x) * alpha),
+    y: clamp01(last.y + (next.y - last.y) * alpha),
+    confidence: clamp01(last.confidence * 0.32 + next.confidence * 0.68),
+  };
+}
+
+function detectFootCandidates(
+  input: Uint8Array,
+  previousCells: number[],
+  previousLeft: FootCandidate,
+  previousRight: FootCandidate,
+) {
+  "worklet";
+  let bestLeftScore = 0;
+  let bestRightScore = 0;
+  let bestLeft = emptyCandidate(0.36);
+  let bestRight = emptyCandidate(0.64);
+  let bestLeftMotion = 0;
+  let bestRightMotion = 0;
   let lowerMotionTotal = 0;
   let lowerMotionCells = 0;
   const nextCells = new Array(GRID_CELL_COUNT).fill(0);
@@ -112,17 +148,19 @@ function detectFootCandidate(input: Uint8Array, previousCells: number[], previou
 
       const normalizedX = (startX + endX) / 2 / INPUT_WIDTH;
       const normalizedY = (startY + endY) / 2 / INPUT_HEIGHT;
+      const isLeftSide = normalizedX < 0.5;
+      const previousCandidate = isLeftSide ? previousLeft : previousRight;
       const bottomBias = 0.75 + Math.pow(row / (GRID_ROWS - 1), 2) * 1.35;
       const sidePenalty = 1 - Math.abs(normalizedX - 0.5) * 0.08;
       const continuity = previousCandidate.confidence > 0
-        ? Math.max(0.5, 1 - Math.hypot(normalizedX - previousCandidate.x, normalizedY - previousCandidate.y) * 1.15)
-        : 0.78;
+        ? Math.max(0.44, 1 - Math.hypot(normalizedX - previousCandidate.x, normalizedY - previousCandidate.y) * 0.92)
+        : 0.84;
       const localProminence = averageLowerMotion > 0 ? motion / averageLowerMotion : 0;
-      const prominenceScore = Math.min(80, Math.max(0, localProminence - 0.85) * 38);
-      const motionScore = Math.min(100, Math.max(0, motion - 2.4) * 8.2);
-      const appearanceScore = (cellDarkness[cellIndex] ?? 0) * 0.22 + (cellContrast[cellIndex] ?? 0) * 0.18;
-      const rowGate = normalizedY >= 0.58 ? 1 : 0.35;
-      const motionGate = motion >= MIN_LOCAL_FOOT_MOTION ? 1 : 0.18;
+      const prominenceScore = Math.min(80, Math.max(0, localProminence - 0.72) * 42);
+      const motionScore = Math.min(100, Math.max(0, motion - 1.3) * 9.4);
+      const appearanceScore = (cellDarkness[cellIndex] ?? 0) * 0.18 + (cellContrast[cellIndex] ?? 0) * 0.16;
+      const rowGate = normalizedY >= 0.5 ? 1 : 0.48;
+      const motionGate = motion >= MIN_LOCAL_FOOT_MOTION ? 1 : 0.42;
       const score =
         (motionScore * 0.58 + prominenceScore * 0.27 + appearanceScore * 0.15) *
         bottomBias *
@@ -131,33 +169,38 @@ function detectFootCandidate(input: Uint8Array, previousCells: number[], previou
         rowGate *
         motionGate;
 
-      if (score > bestScore) {
-        bestScore = score;
-        bestX = normalizedX;
-        bestY = normalizedY;
-        bestMotion = motion;
+      if (isLeftSide && score > bestLeftScore) {
+        bestLeftScore = score;
+        bestLeft = {
+          x: normalizedX,
+          y: normalizedY,
+          confidence: clamp01((motion < MIN_LOCAL_FOOT_MOTION ? score / 250 : score / 105)),
+        };
+        bestLeftMotion = motion;
+      }
+
+      if (!isLeftSide && score > bestRightScore) {
+        bestRightScore = score;
+        bestRight = {
+          x: normalizedX,
+          y: normalizedY,
+          confidence: clamp01((motion < MIN_LOCAL_FOOT_MOTION ? score / 250 : score / 105)),
+        };
+        bestRightMotion = motion;
       }
     }
   }
 
-  if ((bestScore <= 0 || bestMotion < MIN_LOCAL_FOOT_MOTION) && previousCandidate.confidence > 0.08) {
-    return {
-      candidate: {
-        x: previousCandidate.x,
-        y: previousCandidate.y,
-        confidence: previousCandidate.confidence * 0.58,
-      },
-      cells: nextCells,
-    };
-  }
+  const left = bestLeftScore <= 0 || bestLeftMotion < MIN_LOCAL_FOOT_MOTION
+    ? decayCandidate(previousLeft)
+    : bestLeft;
+  const right = bestRightScore <= 0 || bestRightMotion < MIN_LOCAL_FOOT_MOTION
+    ? decayCandidate(previousRight)
+    : bestRight;
 
-  const rawConfidence = bestMotion < MIN_LOCAL_FOOT_MOTION ? bestScore / 280 : bestScore / 120;
   return {
-    candidate: {
-      x: clamp01(bestX),
-      y: clamp01(bestY),
-      confidence: clamp01(rawConfidence),
-    },
+    left,
+    right,
     cells: nextCells,
   };
 }
@@ -167,16 +210,34 @@ export function OnDeviceVolleyCamera({
   height,
   showStatusBadge = false,
   onFootDetected,
+  onFeetDetected,
   onInferenceStatus,
 }: OnDeviceVolleyCameraProps) {
   const device = useCameraDevice("front");
   const { hasPermission, requestPermission } = useCameraPermission();
   const { resize } = useResizePlugin();
   const previousCells = useSharedValue<number[]>(Array(GRID_CELL_COUNT).fill(0));
-  const previousCandidate = useSharedValue<FootCandidate>({ x: 0.5, y: 0.78, confidence: 0 });
+  const previousLeftCandidate = useSharedValue<FootCandidate>({ x: 0.36, y: 0.78, confidence: 0 });
+  const previousRightCandidate = useSharedValue<FootCandidate>({ x: 0.64, y: 0.78, confidence: 0 });
   const reportFoot = useRunOnJS((x: number, y: number, confidence: number) => {
     onFootDetected?.({ x, y, confidence });
   }, [onFootDetected]);
+  const reportFeet = useRunOnJS(
+    (
+      leftX: number,
+      leftY: number,
+      leftConfidence: number,
+      rightX: number,
+      rightY: number,
+      rightConfidence: number,
+    ) => {
+      onFeetDetected?.({
+        left: leftConfidence >= FOOT_REPORT_THRESHOLD ? { x: leftX, y: leftY, confidence: leftConfidence } : undefined,
+        right: rightConfidence >= FOOT_REPORT_THRESHOLD ? { x: rightX, y: rightY, confidence: rightConfidence } : undefined,
+      });
+    },
+    [onFeetDetected],
+  );
   const reportStatus = useRunOnJS((ready: boolean, confidence: number, error?: string) => {
     onInferenceStatus?.({ ready, confidence, error });
   }, [onInferenceStatus]);
@@ -209,23 +270,27 @@ export function OnDeviceVolleyCamera({
         return;
       }
 
-      const detection = detectFootCandidate(input, previousCells.value, previousCandidate.value);
+      const detection = detectFootCandidates(
+        input,
+        previousCells.value,
+        previousLeftCandidate.value,
+        previousRightCandidate.value,
+      );
       previousCells.value = detection.cells;
 
-      const last = previousCandidate.value;
-      const alpha = detection.candidate.confidence > 0.32 ? 0.54 : 0.34;
-      const candidate = {
-        x: clamp01(last.x + (detection.candidate.x - last.x) * alpha),
-        y: clamp01(last.y + (detection.candidate.y - last.y) * alpha),
-        confidence: clamp01(last.confidence * 0.4 + detection.candidate.confidence * 0.6),
-      };
-      previousCandidate.value = candidate;
+      const left = smoothCandidate(previousLeftCandidate.value, detection.left);
+      const right = smoothCandidate(previousRightCandidate.value, detection.right);
+      previousLeftCandidate.value = left;
+      previousRightCandidate.value = right;
 
-      reportStatus(true, candidate.confidence);
-      if (candidate.confidence < 0.22) return;
-      reportFoot(candidate.x * width, candidate.y * height, candidate.confidence);
+      const best = left.confidence >= right.confidence ? left : right;
+      const confidence = Math.max(left.confidence, right.confidence);
+      reportStatus(true, confidence);
+      reportFeet(left.x * width, left.y * height, left.confidence, right.x * width, right.y * height, right.confidence);
+      if (confidence < FOOT_REPORT_THRESHOLD) return;
+      reportFoot(best.x * width, best.y * height, best.confidence);
     });
-  }, [previousCandidate, previousCells, reportFoot, reportStatus, resize, width, height]);
+  }, [previousLeftCandidate, previousRightCandidate, previousCells, reportFeet, reportFoot, reportStatus, resize, width, height]);
 
   if (!hasPermission) {
     return (

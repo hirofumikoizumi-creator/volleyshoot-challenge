@@ -23,6 +23,10 @@ type OnDeviceVolleyCameraComponent = React.ComponentType<{
   modelAsset?: number;
   showStatusBadge?: boolean;
   onFootDetected?: (point: { x: number; y: number; confidence: number }) => void;
+  onFeetDetected?: (feet: {
+    left?: { x: number; y: number; confidence: number };
+    right?: { x: number; y: number; confidence: number };
+  }) => void;
   onInferenceStatus?: (status: { ready: boolean; confidence: number; error?: string }) => void;
 }>;
 type OnDeviceVisionCameraProbeComponent = React.ComponentType<{
@@ -58,6 +62,7 @@ type FootTracker = {
   x: number;
   y: number;
   speed: number;
+  confidence: number;
   ready: boolean;
   lastTs: number;
 };
@@ -158,6 +163,7 @@ const initialFootTracker: FootTracker = {
   x: 180,
   y: 380,
   speed: 0,
+  confidence: 0,
   ready: false,
   lastTs: 0,
 };
@@ -228,6 +234,10 @@ export default function App() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [recognitionRange, setRecognitionRange] = useState<RecognitionRange>("LOWER_BODY");
   const [footTracker, setFootTracker] = useState<FootTracker>(initialFootTracker);
+  const [feetTrackers, setFeetTrackers] = useState<{ left: FootTracker; right: FootTracker }>({
+    left: initialFootTracker,
+    right: initialFootTracker,
+  });
   const [footInputStatus, setFootInputStatus] = useState<FootInputStatus>(initialFootInputStatus);
   const [footAssistEnabled, setFootAssistEnabled] = useState(true);
   const [aiTestStage, setAiTestStage] = useState<AiTestStage>("preview");
@@ -240,6 +250,10 @@ export default function App() {
   const elapsedRef = useRef(0);
   const spawnElapsedRef = useRef(0);
   const footTrackerRef = useRef<FootTracker>(initialFootTracker);
+  const feetTrackersRef = useRef<{ left: FootTracker; right: FootTracker }>({
+    left: initialFootTracker,
+    right: initialFootTracker,
+  });
   const lastAutoKickRef = useRef(0);
 
   const config = configs[difficulty];
@@ -270,7 +284,7 @@ export default function App() {
   const footDistanceLabel = Number.isFinite(footBallDistance) ? `${Math.round(footBallDistance)}px` : "--";
   const hasFootLock =
     footInputStatus.source === "AI" &&
-    footInputStatus.confidence >= 0.22 &&
+    footInputStatus.confidence >= 0.1 &&
     Date.now() - footInputStatus.lastDetectedAt < 900;
   const footInputLabel = hasFootLock ? "FOOT LOCK" : footInputStatus.source === "AI" ? "SEARCHING" : "TOUCH";
   const cameraStatusLabel = footAssistEnabled ? (hasFootLock ? "READY" : "FOOT SEARCH") : "TOUCH MODE";
@@ -307,8 +321,14 @@ export default function App() {
       y: fieldSize.height * 0.76,
       ready: true,
     };
+    const nextFeet = {
+      left: { ...next, x: fieldSize.width * 0.42, confidence: 0, ready: false },
+      right: { ...next, x: fieldSize.width * 0.58, confidence: 0, ready: false },
+    };
     footTrackerRef.current = next;
+    feetTrackersRef.current = nextFeet;
     setFootTracker(next);
+    setFeetTrackers(nextFeet);
   }, [fieldSize, footTracker.ready]);
 
   const resetSession = (nextDifficulty: Difficulty, nextMessage: string) => {
@@ -320,9 +340,11 @@ export default function App() {
     setIsPaused(false);
     setMessage(nextMessage);
     setFootTracker(initialFootTracker);
+    setFeetTrackers({ left: initialFootTracker, right: initialFootTracker });
     setFootInputStatus(initialFootInputStatus);
     setFootAssistEnabled(true);
     footTrackerRef.current = initialFootTracker;
+    feetTrackersRef.current = { left: initialFootTracker, right: initialFootTracker };
     elapsedRef.current = 0;
     spawnElapsedRef.current = nextConfig.spawnMs;
     lastTickRef.current = Date.now();
@@ -348,8 +370,14 @@ export default function App() {
       y: fieldSize.height > 0 ? fieldSize.height * 0.76 : initialFootTracker.y,
       ready: fieldSize.width > 0 && fieldSize.height > 0,
     };
+    const nextFeet = {
+      left: { ...nextFoot, x: fieldSize.width > 0 ? fieldSize.width * 0.42 : initialFootTracker.x, ready: false },
+      right: { ...nextFoot, x: fieldSize.width > 0 ? fieldSize.width * 0.58 : initialFootTracker.x, ready: false },
+    };
     footTrackerRef.current = nextFoot;
+    feetTrackersRef.current = nextFeet;
     setFootTracker(nextFoot);
+    setFeetTrackers(nextFeet);
     setScreen("cameraPlay");
   };
 
@@ -562,9 +590,11 @@ export default function App() {
     const dx = smoothedX - previous.x;
     const dy = smoothedY - previous.y;
     const speed = Math.sqrt(dx * dx + dy * dy) / elapsed;
-    const next = { x: smoothedX, y: smoothedY, speed, ready: true, lastTs: now };
+    const next = { x: smoothedX, y: smoothedY, speed, confidence, ready: true, lastTs: now };
     footTrackerRef.current = next;
     setFootTracker(next);
+    feetTrackersRef.current = { left: next, right: next };
+    setFeetTrackers(feetTrackersRef.current);
     setFootInputStatus((current) => ({
       ...current,
       source,
@@ -581,6 +611,73 @@ export default function App() {
     ) {
       lastAutoKickRef.current = now;
       shootAt(next, footReach.good, footReach.perfect, "foot");
+    }
+  };
+
+  const smoothFootTracker = (
+    previous: FootTracker,
+    point: { x: number; y: number; confidence: number } | undefined,
+    fallbackX: number,
+    fallbackY: number,
+    now: number,
+  ): FootTracker => {
+    if (!point || point.confidence < 0.08) {
+      return {
+        ...previous,
+        x: previous.ready ? previous.x : fallbackX,
+        y: previous.ready ? previous.y : fallbackY,
+        speed: previous.speed * 0.72,
+        confidence: previous.confidence * 0.72,
+        ready: previous.ready && previous.confidence > 0.06,
+        lastTs: previous.lastTs || now,
+      };
+    }
+
+    const smoothing = Math.max(0.32, Math.min(0.68, point.confidence + 0.18));
+    const baseX = previous.ready ? previous.x : point.x;
+    const baseY = previous.ready ? previous.y : point.y;
+    const x = baseX + (point.x - baseX) * smoothing;
+    const y = baseY + (point.y - baseY) * smoothing;
+    const elapsed = Math.max(16, now - (previous.lastTs || now - 16));
+    const speed = Math.hypot(x - previous.x, y - previous.y) / elapsed;
+    return { x, y, speed, confidence: point.confidence, ready: true, lastTs: now };
+  };
+
+  const registerFeetPositions = (feet: {
+    left?: { x: number; y: number; confidence: number };
+    right?: { x: number; y: number; confidence: number };
+  }) => {
+    const now = Date.now();
+    const previous = feetTrackersRef.current;
+    const fallbackY = fieldSize.height > 0 ? fieldSize.height * 0.76 : initialFootTracker.y;
+    const left = smoothFootTracker(previous.left, feet.left, fieldSize.width * 0.42, fallbackY, now);
+    const right = smoothFootTracker(previous.right, feet.right, fieldSize.width * 0.58, fallbackY, now);
+    const nextFeet = { left, right };
+    const active = right.speed * (0.7 + right.confidence) >= left.speed * (0.7 + left.confidence) ? right : left;
+
+    feetTrackersRef.current = nextFeet;
+    footTrackerRef.current = active;
+    setFeetTrackers(nextFeet);
+    setFootTracker(active);
+    setFootInputStatus((current) => ({
+      ...current,
+      source: "AI",
+      confidence: Math.max(left.confidence, right.confidence),
+      aiReady: true,
+      lastDetectedAt: now,
+      error: undefined,
+    }));
+
+    if (
+      screen === "cameraPlay" &&
+      active.ready &&
+      active.speed > AUTO_KICK_SPEED_THRESHOLD &&
+      active.confidence >= 0.08 &&
+      hasVolleyCandidate(active, footReach.good) &&
+      now - lastAutoKickRef.current > AUTO_KICK_COOLDOWN_MS
+    ) {
+      lastAutoKickRef.current = now;
+      shootAt(active, footReach.good, footReach.perfect, "foot");
     }
   };
 
@@ -1009,6 +1106,7 @@ export default function App() {
                   height={fieldSize.height}
                   modelAsset={moveNetLightningModel}
                   onFootDetected={(point) => registerFootPosition(point.x, point.y, "AI", point.confidence)}
+                  onFeetDetected={registerFeetPositions}
                   onInferenceStatus={(status) => {
                     setFootInputStatus((current) => ({
                       ...current,
@@ -1054,7 +1152,7 @@ export default function App() {
                 </View>
 
                 <View style={styles.volleyLane} />
-                {(hasFootLock || footInputStatus.source === "MANUAL") && (
+                {footInputStatus.source === "MANUAL" && (
                   <>
                     <View
                       style={[
@@ -1081,10 +1179,35 @@ export default function App() {
                         },
                       ]}
                     >
-                      <Text style={styles.footMarkerText}>{hasFootLock ? "FOOT" : "TOUCH"}</Text>
+                      <Text style={styles.footMarkerText}>TOUCH</Text>
                     </View>
                   </>
                 )}
+
+                {(["left", "right"] as const).map((side) => {
+                  const foot = feetTrackers[side];
+                  const isLocked = foot.ready && foot.confidence >= 0.08 && Date.now() - foot.lastTs < 1100;
+                  if (!hasFootLock || !isLocked) return null;
+                  return (
+                    <View
+                      key={side}
+                      style={[
+                        styles.footMarker,
+                        side === "left" ? styles.leftFootMarker : styles.rightFootMarker,
+                        {
+                          left: foot.x - footReach.marker,
+                          top: foot.y - footReach.marker,
+                          width: footReach.marker * 2,
+                          height: footReach.marker * 1.18,
+                          borderRadius: footReach.marker,
+                          transform: [{ rotate: `${Math.max(-34, Math.min(34, foot.speed * 18))}deg` }],
+                        },
+                      ]}
+                    >
+                      <Text style={styles.footMarkerText}>{side === "left" ? "L FOOT" : "R FOOT"}</Text>
+                    </View>
+                  );
+                })}
 
                 {balls.map((ball) => (
                   <View
@@ -2113,9 +2236,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     zIndex: 8,
   },
+  leftFootMarker: {
+    borderColor: "#00D9FF",
+    backgroundColor: "rgba(0,217,255,0.2)",
+  },
+  rightFootMarker: {
+    borderColor: "#A3FF12",
+    backgroundColor: "rgba(163,255,18,0.18)",
+  },
   footMarkerText: {
-    color: "#A3FF12",
-    fontSize: 9,
+    color: "#FFFFFF",
+    fontSize: 8,
     fontWeight: "900",
   },
   playRoot: {
