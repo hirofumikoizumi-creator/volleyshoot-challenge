@@ -64,6 +64,13 @@ export default function GameScreen() {
 
   const difficulty = gameState?.difficulty || 'NORMAL';
 
+  const generatePositioningPoseData = () => {
+    const pose = generateDummyPoseData();
+    pose.landmarks[11] = { ...pose.landmarks[11], x: 0.45, y: 0.4, z: 1, visibility: 1 };
+    pose.landmarks[12] = { ...pose.landmarks[12], x: 0.55, y: 0.4, z: 1, visibility: 1 };
+    return pose;
+  };
+
   const generateBall = () => {
     const now = Date.now();
     if (now - lastBallTimeRef.current < DIFFICULTY_CONFIG[difficulty].ballSpawnInterval) return;
@@ -161,6 +168,18 @@ export default function GameScreen() {
       setCombo(0);
     }
   }, [combo, lastComboTime]);
+
+  useEffect(() => {
+    if (isPositioningComplete || isGameActive) return;
+
+    setPoseData(generatePositioningPoseData());
+
+    const positioningLoop = setInterval(() => {
+      setPoseData(generatePositioningPoseData());
+    }, 250);
+
+    return () => clearInterval(positioningLoop);
+  }, [isPositioningComplete, isGameActive]);
 
   useEffect(() => {
     if (!isGameActive) return;

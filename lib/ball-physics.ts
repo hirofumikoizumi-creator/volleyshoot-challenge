@@ -123,8 +123,8 @@ export function isBallInScreen(
   screenHeight: number
 ): boolean {
   return (
-    x + radius > 0 &&
-    x - radius < screenWidth &&
+    x + radius > -80 &&
+    x - radius < screenWidth + 80 &&
     y + radius > 0 &&
     y - radius < screenHeight + 100 // 画面下部少し下まで許容
   );

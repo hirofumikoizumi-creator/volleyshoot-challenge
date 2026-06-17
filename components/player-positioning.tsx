@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Dimensions } from 'react-native';
-import { PoseData } from '@/lib/types/pose';
+import { PoseData, PoseLandmark } from '@/lib/types/pose';
 
 const { width, height } = Dimensions.get('window');
 
@@ -15,14 +15,13 @@ export function PlayerPositioning({ poseData, onPositioningComplete }: PlayerPos
 
   // プレイヤーが最適な位置にいるか判定
   useEffect(() => {
-    if (!poseData || !poseData.landmarks || poseData.landmarks.length < 34) {
+    if (!poseData || !poseData.landmarks || poseData.landmarks.length <= PoseLandmark.RIGHT_SHOULDER) {
       setIsInPosition(false);
       return;
     }
 
-    // 両肩のキーポイント（インデックス 11, 12）
-    const leftShoulder = poseData.landmarks[11];
-    const rightShoulder = poseData.landmarks[12];
+    const leftShoulder = poseData.landmarks[PoseLandmark.LEFT_SHOULDER];
+    const rightShoulder = poseData.landmarks[PoseLandmark.RIGHT_SHOULDER];
 
     if (!leftShoulder || !rightShoulder) {
       setIsInPosition(false);
@@ -36,7 +35,9 @@ export function PlayerPositioning({ poseData, onPositioningComplete }: PlayerPos
     // 最適な位置：画面中央、上から30-70%の範囲
     const isInCenterX = shoulderX > 0.3 && shoulderX < 0.7;
     const isInCenterY = shoulderY > 0.2 && shoulderY < 0.6;
-    const isVisible = (leftShoulder.z ?? 0) > 0.5 && (rightShoulder.z ?? 0) > 0.5;
+    const isVisible =
+      (leftShoulder.visibility ?? poseData.visibility ?? 1) > 0.5 &&
+      (rightShoulder.visibility ?? poseData.visibility ?? 1) > 0.5;
 
     setIsInPosition(isInCenterX && isInCenterY && isVisible);
   }, [poseData]);
