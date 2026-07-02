@@ -301,20 +301,17 @@
     <div class="eyebrow">VOLLEY TRAINING GAME</div>
     <h1 class="title">ボレーシュート<br /><span class="gold">チャレンジ</span></h1>
     <p class="subtitle">カメラの前に立って、画面に飛んでくるボールを実際に足で蹴ろう。AIがあなたの足の動きをリアルタイムで検出します。</p>
-    <div class="difficulty-row" id="mode-row">
-      <button class="diff-btn mode-btn selected" data-mode="VOLLEY">ボレーシュート<small>足で蹴る</small></button>
-      <button class="diff-btn mode-btn" data-mode="CONTROL">ボールコントロール<small>指示された部位で</small></button>
-    </div>
     <div class="difficulty-row" id="difficulty-row">
-      <button class="diff-btn" data-diff="EASY">イージー<small>60秒・ゆっくり</small></button>
+      <button class="diff-btn" data-diff="EASY">イージー<small>60秒・大きいボール</small></button>
       <button class="diff-btn selected" data-diff="NORMAL">ノーマル<small>60秒・標準</small></button>
-      <button class="diff-btn" data-diff="HARD">ハード<small>45秒・高速</small></button>
+      <button class="diff-btn" data-diff="HARD">ハード<small>45秒・高速&小さい</small></button>
     </div>
     <div class="highscore-line" id="highscore-line">ハイスコア: 0</div>
     <div class="howto">
       <div><b>1.</b> スマホを床や台に立てかけて固定する</div>
       <div><b>2.</b> 2〜3歩下がって、<b>足元まで全身</b>が映るようにする</div>
-      <div><b>3.</b> 飛んでくるボールに合わせてプレー!素早く動かすと <b>PERFECT</b> で1.5倍</div>
+      <div><b>3.</b> ボールは<b>足を振って蹴る</b>!触れるだけでは無得点、速く振ると <b>PERFECT</b> で1.5倍</div>
+      <div><b>※</b> 正面から来るボールは<b>「蹴りどき!」の光るリング</b>が出た瞬間に蹴ろう</div>
       <div><b>4.</b> <b style="color:#FF4757">黒ボールはさわるな!</b> 当たると減点+コンボ切れ</div>
       <div><b>※</b> iPad・PCは<b>横画面</b>推奨/スマホは縦でもOK</div>
     </div>
@@ -340,7 +337,7 @@
       <div class="stat-box"><div class="s-label">成功率</div><div class="s-value" id="r-rate">0%</div></div>
       <div class="stat-box"><div class="s-label">最大コンボ</div><div class="s-value" id="r-combo">0</div></div>
       <div class="stat-box"><div class="s-label">PERFECT</div><div class="s-value" id="r-perfect">0</div></div>
-      <div class="stat-box"><div class="s-label">ミス/減点</div><div class="s-value" id="r-penalty" style="color:#FF4757">0</div></div>
+      <div class="stat-box"><div class="s-label">黒ボール減点</div><div class="s-value" id="r-penalty" style="color:#FF4757">0</div></div>
     </div>
     <button class="btn" id="replay-btn">もう一度プレイ</button>
     <button class="btn ghost" id="home-btn">ホームに戻る</button>
@@ -359,9 +356,9 @@ import {
 
 /* ---------------- 定数・難易度設定 ---------------- */
 const DIFFICULTY = {
-  EASY:   { timeLimit: 60, spawnInterval: 2300, speedMin: 0.42, speedMax: 0.58, gravity: 0.62, hitRadius: 78, blueRate: 0.00, goldRate: 0.08, blackRate: 0.06, multiplier: 1.0 },
-  NORMAL: { timeLimit: 60, spawnInterval: 1750, speedMin: 0.52, speedMax: 0.72, gravity: 0.72, hitRadius: 62, blueRate: 0.12, goldRate: 0.08, blackRate: 0.12, multiplier: 1.5 },
-  HARD:   { timeLimit: 45, spawnInterval: 1300, speedMin: 0.62, speedMax: 0.88, gravity: 0.82, hitRadius: 50, blueRate: 0.20, goldRate: 0.10, blackRate: 0.16, multiplier: 2.0 },
+  EASY:   { timeLimit: 60, spawnInterval: 2300, speedMin: 0.42, speedMax: 0.58, gravity: 0.62, hitRadius: 78, blueRate: 0.00, goldRate: 0.08, blackRate: 0.06, multiplier: 1.0, ballScale: 1.25, frontRate: 0.35 },
+  NORMAL: { timeLimit: 60, spawnInterval: 1750, speedMin: 0.52, speedMax: 0.72, gravity: 0.72, hitRadius: 62, blueRate: 0.12, goldRate: 0.08, blackRate: 0.12, multiplier: 1.5, ballScale: 1.0, frontRate: 0.45 },
+  HARD:   { timeLimit: 45, spawnInterval: 1300, speedMin: 0.62, speedMax: 0.88, gravity: 0.82, hitRadius: 50, blueRate: 0.20, goldRate: 0.10, blackRate: 0.16, multiplier: 2.0, ballScale: 0.8, frontRate: 0.5 },
 };
 const BALL_TYPE = {
   NORMAL: { points: 10, color: "#F5F8FF", glow: "rgba(245,248,255,0.9)" },
@@ -378,6 +375,7 @@ const PARTS = {
 };
 const PART_WEIGHTS = [["FOOT", 0.35], ["HEAD", 0.25], ["THIGH", 0.25], ["SHOULDER", 0.15]];
 const PERFECT_FOOT_SPEED = 900;   // px/s 以上の振り足で PERFECT
+const KICK_MIN_SPEED = 320;       // px/s 未満の接触は「タッチ」扱いで無得点
 const COMBO_TIMEOUT = 2600;       // ms
 const BALL_RADIUS_BASE = 26;      // px (画面幅で微調整)
 // MediaPipe Pose ランドマーク index
@@ -398,7 +396,7 @@ const errorBox = $("error-box");
 /* ---------------- 状態 ---------------- */
 let phase = "start"; // start | loading | positioning | countdown | playing | result
 let difficulty = "NORMAL";
-let gameMode = "VOLLEY"; // VOLLEY | CONTROL
+const gameMode = "VOLLEY"; // ボレー専用(コントロールモードは将来の大画面向けに休眠中)
 let bodyParts = {}; // {footL, footR, head, shoulderL, shoulderR, thighL, thighR} 各 {x,y,speed}
 let penaltyCount = 0;
 let faultCount = 0;
@@ -697,16 +695,53 @@ function spawnBall(nowMs) {
   const flightBase = gameMode === "CONTROL" ? 2.15 : 1.9; // コントロールは少し遅め
   const flightTime = (flightBase - speedFactor) / typeSpeed;
   const g = cfg.gravity * 1600 * DPR();
+  const fullRadius = BALL_RADIUS_BASE * DPR() * cfg.ballScale * Math.min(1.25, Math.max(0.8, w / (420 * DPR()))) * (type === "GOLD" ? 0.92 : 1);
+
+  // 正面から飛んでくるボール(奥行き疑似表現)
+  if (Math.random() < cfg.frontRate) {
+    // 目標: 検出中の足元(なければ画面下部ゾーン)
+    const feetPts = [feet.left, feet.right].filter(Boolean);
+    let tx, ty;
+    if (feetPts.length > 0) {
+      const fp = feetPts[Math.floor(Math.random() * feetPts.length)];
+      const d = DPR();
+      tx = Math.max(w * 0.15, Math.min(w * 0.85, fp.x + (Math.random() - 0.5) * 180 * d));
+      ty = Math.max(h * 0.4, Math.min(h * 0.95, fp.y + (Math.random() - 0.5) * 80 * d));
+    } else {
+      tx = w * (0.3 + Math.random() * 0.4);
+      ty = h * (0.7 + Math.random() * 0.15);
+    }
+    const sx = w * (0.35 + Math.random() * 0.3); // 遠くの出現位置(中央上寄り)
+    const sy = h * (0.2 + Math.random() * 0.12);
+    balls.push({
+      id: ballId++, kind: "FRONT",
+      x: sx, y: sy, vx: 0, vy: 0,
+      startX: sx, startY: sy, targetX: tx, targetY: ty,
+      p: 0, flightTime: flightTime * 1.15, // 正面は少し余裕を持たせる
+      fullRadius, radius: fullRadius * 0.32,
+      type, active: true, spin: 0, kicked: false, kickedVx: 0, kickedVy: 0,
+      requiredPart, faulted: false, touchHinted: false, fade: 1,
+    });
+    if (type !== "BLACK") totalBalls++;
+    return;
+  }
+
   const vy0 = -Math.sqrt(2 * g * Math.max(60, startY - apexY));
   const vx0 = (targetX - startX) / flightTime;
-  const radius = BALL_RADIUS_BASE * DPR() * Math.min(1.25, Math.max(0.8, w / (420 * DPR()))) * (type === "GOLD" ? 0.92 : 1);
   balls.push({
-    id: ballId++, x: startX, y: startY, vx: vx0, vy: vy0,
-    radius, type, active: true, spin: 0, kicked: false, kickedVx: 0, kickedVy: 0,
-    requiredPart, faulted: false,
+    id: ballId++, kind: "SIDE", x: startX, y: startY, vx: vx0, vy: vy0,
+    radius: fullRadius, type, active: true, spin: 0, kicked: false, kickedVx: 0, kickedVy: 0,
+    requiredPart, faulted: false, touchHinted: false, fade: 1,
   });
   if (type !== "BLACK") totalBalls++;
 }
+// 正面ボールがキック可能な進行度の窓
+const FRONT_KICK_MIN_P = 0.76;
+const FRONT_KICK_MAX_P = 1.1;
+function isFrontKickable(b) {
+  return b.kind === "FRONT" && b.p >= FRONT_KICK_MIN_P && b.p <= FRONT_KICK_MAX_P;
+}
+function easeInQuad(t) { return t * t; }
 function updateBalls(dt, nowMs) {
   const cfg = DIFFICULTY[difficulty];
   const g = cfg.gravity * 1600 * DPR();
@@ -718,6 +753,22 @@ function updateBalls(dt, nowMs) {
       b.spin += dt * 25;
       continue;
     }
+    if (b.kind === "FRONT") {
+      b.p += dt / b.flightTime;
+      const pc = Math.min(1, b.p);
+      // 位置: 出発点→足元へ。少し山なりの弧を描く
+      b.x = b.startX + (b.targetX - b.startX) * pc;
+      b.y = b.startY + (b.targetY - b.startY) * easeInQuad(pc) - Math.sin(pc * Math.PI) * 40 * DPR();
+      // 奥行き: 近づくほど大きく
+      b.radius = b.fullRadius * (0.32 + 0.68 * easeInQuad(pc));
+      b.spin += dt * 5;
+      // 通り過ぎたらフェードアウト
+      if (b.p > FRONT_KICK_MAX_P) {
+        b.fade = Math.max(0, 1 - (b.p - FRONT_KICK_MAX_P) / 0.25);
+        b.radius = b.fullRadius * (1 + (b.p - 1) * 0.6); // 手前に抜けて更に拡大
+      }
+      continue;
+    }
     b.vy += g * dt;
     b.x += b.vx * dt;
     b.y += b.vy * dt;
@@ -725,7 +776,9 @@ function updateBalls(dt, nowMs) {
   }
   // 画面外に出たボールを除去(未キックはミス扱い→コンボ切れ)
   balls = balls.filter((b) => {
-    const out = b.x < -140 || b.x > w + 140 || b.y > h + 140 || b.y < -240;
+    const out = b.kind === "FRONT" && !b.kicked
+      ? b.fade <= 0
+      : (b.x < -140 || b.x > w + 140 || b.y > h + 140 || b.y < -240);
     if (out && b.active && !b.kicked && phase === "playing" && b.type !== "BLACK") {
       combo = 0;
       updateComboBanner();
@@ -739,11 +792,16 @@ function updateBalls(dt, nowMs) {
     if (hitFeet.length === 0) return;
     for (const b of balls) {
       if (!b.active || b.kicked) continue;
+      if (b.kind === "FRONT" && !isFrontKickable(b)) continue; // まだ遠い/通過後は判定なし
       for (const f of hitFeet) {
         const dist = Math.hypot(f.x - b.x, f.y - b.y);
         if (dist <= cfg.hitRadius * DPR() + b.radius) {
-          if (b.type === "BLACK") onBlackHit(b, nowMs);
-          else onKick(b, f, nowMs);
+          if (b.type === "BLACK") { onBlackHit(b, nowMs); break; } // 黒はそっと触れてもアウト
+          if ((f.speed || 0) >= KICK_MIN_SPEED * DPR()) {
+            onKick(b, f, nowMs); // スイングあり=キック成立
+          } else {
+            onTouch(b, nowMs);   // スイングなし=タッチ(無得点)
+          }
           break;
         }
       }
@@ -772,6 +830,17 @@ function updateBalls(dt, nowMs) {
       }
     }
   }
+}
+function onTouch(ball, nowMs) {
+  if (ball.touchHinted) return; // 同じボールで連発させない
+  ball.touchHinted = true;
+  popups.push({
+    x: ball.x, y: ball.y - 20,
+    text: "タッチ…", sub: "足を振って蹴ろう!",
+    born: nowMs, life: 900, color: "#9AA3B8",
+  });
+  playBeep(300, 0.08, 0.08);
+  vibrate(15);
 }
 function onBlackHit(ball, nowMs) {
   const cfg = DIFFICULTY[difficulty];
@@ -895,6 +964,26 @@ function roundRect(c, x, y, w, h, r) {
 }
 function drawBall(b) {
   const d = DPR();
+  // 正面ボール: 蹴りどきになったらパルスリングで知らせる
+  if (isFrontKickable(b) && !b.kicked) {
+    const pulse = 1 + Math.sin(performance.now() / 90) * 0.08;
+    ctx.save();
+    ctx.strokeStyle = b.type === "BLACK" ? "rgba(255,71,87,0.95)" : "rgba(245,248,255,0.95)";
+    ctx.lineWidth = 4 * d;
+    ctx.shadowColor = b.type === "BLACK" ? "rgba(255,71,87,1)" : "rgba(35,224,255,1)";
+    ctx.shadowBlur = 18 * d;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, (b.radius + 12 * d) * pulse, 0, Math.PI * 2);
+    ctx.stroke();
+    if (b.type !== "BLACK") {
+      ctx.textAlign = "center";
+      ctx.font = `800 ${13 * d}px 'M PLUS Rounded 1c', sans-serif`;
+      ctx.fillStyle = "#F5F8FF";
+      ctx.shadowBlur = 4 * d;
+      ctx.fillText("蹴りどき!", b.x, b.y - b.radius - 18 * d);
+    }
+    ctx.restore();
+  }
   // コントロールモード: ボール上部に指示部位ラベルとリングを描画
   if (b.requiredPart && !b.kicked && !b.faulted) {
     const pc = PARTS[b.requiredPart];
@@ -941,7 +1030,11 @@ function drawBall(b) {
   ctx.save();
   ctx.translate(b.x, b.y);
   ctx.rotate(b.spin);
-  ctx.globalAlpha = b.faulted ? 0.35 : 1;
+  ctx.globalAlpha = (b.faulted ? 0.35 : 1) * (b.fade !== undefined ? b.fade : 1);
+  // 遠くにある正面ボールは少し霞ませて奥行き感を出す
+  if (b.kind === "FRONT" && !b.kicked && b.p < FRONT_KICK_MIN_P) {
+    ctx.globalAlpha *= 0.55 + 0.45 * (b.p / FRONT_KICK_MIN_P);
+  }
   const t = BALL_TYPE[b.type];
   // グロー
   ctx.shadowColor = t.glow;
@@ -977,11 +1070,13 @@ function drawBall(b) {
 function drawFoot(f, nowMs) {
   if (!f) return;
   const cfg = DIFFICULTY[difficulty];
-  const fast = (f.speed || 0) >= PERFECT_FOOT_SPEED * DPR();
+  const spd = f.speed || 0;
+  const fast = spd >= PERFECT_FOOT_SPEED * DPR();
+  const armed = spd >= KICK_MIN_SPEED * DPR(); // キック成立速度に達しているか
   const d = DPR();
   // 判定サークル
   ctx.save();
-  ctx.strokeStyle = fast ? "rgba(255,197,61,0.9)" : "rgba(35,224,255,0.75)";
+  ctx.strokeStyle = fast ? "rgba(255,197,61,0.9)" : armed ? "rgba(35,224,255,0.95)" : "rgba(35,224,255,0.45)";
   ctx.lineWidth = 3 * d;
   ctx.setLineDash([8 * d, 8 * d]);
   ctx.lineDashOffset = -((nowMs / 40) % 16) * d;
@@ -992,7 +1087,7 @@ function drawFoot(f, nowMs) {
   // 中心マーカー
   ctx.shadowColor = fast ? "rgba(255,197,61,1)" : "rgba(35,224,255,1)";
   ctx.shadowBlur = 16 * d;
-  ctx.fillStyle = fast ? "#FFC53D" : "#23E0FF";
+  ctx.fillStyle = fast ? "#FFC53D" : armed ? "#23E0FF" : "rgba(35,224,255,0.55)";
   ctx.beginPath();
   ctx.arc(f.x, f.y, 9 * d, 0, Math.PI * 2);
   ctx.fill();
@@ -1259,9 +1354,8 @@ rafHandle = requestAnimationFrame(loop);
 
 /* ---------------- UIイベント ---------------- */
 function refreshHighScoreLine() {
-  const modeName = gameMode === "VOLLEY" ? "ボレー" : "コントロール";
   const diffName = difficulty === "EASY" ? "イージー" : difficulty === "NORMAL" ? "ノーマル" : "ハード";
-  $("highscore-line").textContent = `ハイスコア (${modeName}・${diffName}): ${getHighScore(difficulty)}`;
+  $("highscore-line").textContent = `ハイスコア (${diffName}): ${getHighScore(difficulty)}`;
 }
 document.querySelectorAll("#difficulty-row .diff-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -1271,16 +1365,6 @@ document.querySelectorAll("#difficulty-row .diff-btn").forEach((btn) => {
     refreshHighScoreLine();
     initAudio();
     playBeep(740, 0.08, 0.1);
-  });
-});
-document.querySelectorAll("#mode-row .mode-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll("#mode-row .mode-btn").forEach((b) => b.classList.remove("selected"));
-    btn.classList.add("selected");
-    gameMode = btn.dataset.mode;
-    refreshHighScoreLine();
-    initAudio();
-    playBeep(880, 0.08, 0.1);
   });
 });
 $("start-btn").addEventListener("click", startGameFlow);
