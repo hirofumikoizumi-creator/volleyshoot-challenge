@@ -45,6 +45,7 @@
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
     gap: 18px;
+    overflow-y: auto;
     padding: max(20px, env(safe-area-inset-top)) 24px max(28px, env(safe-area-inset-bottom));
     background:
       radial-gradient(120% 90% at 50% -10%, rgba(35, 224, 255, 0.14), transparent 55%),
@@ -94,7 +95,13 @@
   .btn:disabled { opacity: .45; pointer-events: none; }
 
   /* 難易度セレクタ */
-  .difficulty-row { display: flex; gap: 10px; }
+  .difficulty-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  @media (orientation: landscape) and (max-height: 520px) {
+    .screen { gap: 10px; justify-content: flex-start; padding-top: 16px; }
+    h1.title { font-size: clamp(22px, 5vw, 34px); }
+    .howto { font-size: 11px; padding: 10px 14px; gap: 4px; }
+    .subtitle { font-size: 12px; }
+  }
   .diff-btn {
     font-family: var(--body-font); font-weight: 800; font-size: 14px;
     color: rgba(245,248,255,.75);
@@ -294,6 +301,10 @@
     <div class="eyebrow">VOLLEY TRAINING GAME</div>
     <h1 class="title">ボレーシュート<br /><span class="gold">チャレンジ</span></h1>
     <p class="subtitle">カメラの前に立って、画面に飛んでくるボールを実際に足で蹴ろう。AIがあなたの足の動きをリアルタイムで検出します。</p>
+    <div class="difficulty-row" id="mode-row">
+      <button class="diff-btn mode-btn selected" data-mode="VOLLEY">ボレーシュート<small>足で蹴る</small></button>
+      <button class="diff-btn mode-btn" data-mode="CONTROL">ボールコントロール<small>指示された部位で</small></button>
+    </div>
     <div class="difficulty-row" id="difficulty-row">
       <button class="diff-btn" data-diff="EASY">イージー<small>60秒・ゆっくり</small></button>
       <button class="diff-btn selected" data-diff="NORMAL">ノーマル<small>60秒・標準</small></button>
@@ -303,7 +314,9 @@
     <div class="howto">
       <div><b>1.</b> スマホを床や台に立てかけて固定する</div>
       <div><b>2.</b> 2〜3歩下がって、<b>足元まで全身</b>が映るようにする</div>
-      <div><b>3.</b> 飛んでくるボールに足を合わせてキック!素早く振るほど <b>PERFECT</b> で高得点</div>
+      <div><b>3.</b> 飛んでくるボールに合わせてプレー!素早く動かすと <b>PERFECT</b> で1.5倍</div>
+      <div><b>4.</b> <b style="color:#FF4757">黒ボールはさわるな!</b> 当たると減点+コンボ切れ</div>
+      <div><b>※</b> iPad・PCは<b>横画面</b>推奨/スマホは縦でもOK</div>
     </div>
     <button class="btn gold" id="start-btn">ゲームスタート</button>
     <div id="error-box" class="hidden"></div>
@@ -327,6 +340,7 @@
       <div class="stat-box"><div class="s-label">成功率</div><div class="s-value" id="r-rate">0%</div></div>
       <div class="stat-box"><div class="s-label">最大コンボ</div><div class="s-value" id="r-combo">0</div></div>
       <div class="stat-box"><div class="s-label">PERFECT</div><div class="s-value" id="r-perfect">0</div></div>
+      <div class="stat-box"><div class="s-label">ミス/減点</div><div class="s-value" id="r-penalty" style="color:#FF4757">0</div></div>
     </div>
     <button class="btn" id="replay-btn">もう一度プレイ</button>
     <button class="btn ghost" id="home-btn">ホームに戻る</button>
@@ -345,15 +359,24 @@ import {
 
 /* ---------------- 定数・難易度設定 ---------------- */
 const DIFFICULTY = {
-  EASY:   { timeLimit: 60, spawnInterval: 2300, speedMin: 0.42, speedMax: 0.58, gravity: 0.62, hitRadius: 78, blueRate: 0.00, goldRate: 0.08, multiplier: 1.0 },
-  NORMAL: { timeLimit: 60, spawnInterval: 1750, speedMin: 0.52, speedMax: 0.72, gravity: 0.72, hitRadius: 62, blueRate: 0.12, goldRate: 0.08, multiplier: 1.5 },
-  HARD:   { timeLimit: 45, spawnInterval: 1300, speedMin: 0.62, speedMax: 0.88, gravity: 0.82, hitRadius: 50, blueRate: 0.20, goldRate: 0.10, multiplier: 2.0 },
+  EASY:   { timeLimit: 60, spawnInterval: 2300, speedMin: 0.42, speedMax: 0.58, gravity: 0.62, hitRadius: 78, blueRate: 0.00, goldRate: 0.08, blackRate: 0.06, multiplier: 1.0 },
+  NORMAL: { timeLimit: 60, spawnInterval: 1750, speedMin: 0.52, speedMax: 0.72, gravity: 0.72, hitRadius: 62, blueRate: 0.12, goldRate: 0.08, blackRate: 0.12, multiplier: 1.5 },
+  HARD:   { timeLimit: 45, spawnInterval: 1300, speedMin: 0.62, speedMax: 0.88, gravity: 0.82, hitRadius: 50, blueRate: 0.20, goldRate: 0.10, blackRate: 0.16, multiplier: 2.0 },
 };
 const BALL_TYPE = {
   NORMAL: { points: 10, color: "#F5F8FF", glow: "rgba(245,248,255,0.9)" },
   BLUE:   { points: 20, color: "#3B9CFF", glow: "rgba(59,156,255,0.95)" },
   GOLD:   { points: 30, color: "#FFC53D", glow: "rgba(255,197,61,0.95)" },
+  BLACK:  { points: -20, color: "#1A1A22", glow: "rgba(255,71,87,0.95)" },
 };
+// ボールコントロールモードの部位定義
+const PARTS = {
+  FOOT:     { label: "ボレー",   color: "#23E0FF", radiusScale: 1.0 },
+  HEAD:     { label: "ヘディング", color: "#FFC53D", radiusScale: 1.15 },
+  THIGH:    { label: "モモ",     color: "#7CFC9A", radiusScale: 1.0 },
+  SHOULDER: { label: "カタ",     color: "#C77DFF", radiusScale: 0.95 },
+};
+const PART_WEIGHTS = [["FOOT", 0.35], ["HEAD", 0.25], ["THIGH", 0.25], ["SHOULDER", 0.15]];
 const PERFECT_FOOT_SPEED = 900;   // px/s 以上の振り足で PERFECT
 const COMBO_TIMEOUT = 2600;       // ms
 const BALL_RADIUS_BASE = 26;      // px (画面幅で微調整)
@@ -375,6 +398,10 @@ const errorBox = $("error-box");
 /* ---------------- 状態 ---------------- */
 let phase = "start"; // start | loading | positioning | countdown | playing | result
 let difficulty = "NORMAL";
+let gameMode = "VOLLEY"; // VOLLEY | CONTROL
+let bodyParts = {}; // {footL, footR, head, shoulderL, shoulderR, thighL, thighR} 各 {x,y,speed}
+let penaltyCount = 0;
+let faultCount = 0;
 let facingMode = "environment";
 let mirrored = false;
 let poseLandmarker = null;
@@ -392,6 +419,7 @@ let ballId = 0;
 let lastSpawn = 0;
 
 let score = 0, hits = 0, totalBalls = 0, combo = 0, maxCombo = 0, perfectCount = 0;
+// (penaltyCount/faultCount は上で宣言済み)
 let lastHitAt = 0;
 let timeRemaining = 60;
 let timerHandle = null;
@@ -408,7 +436,7 @@ function setScreen(name) {
     if (key === name) show(screens[key]); else hide(screens[key]);
   }
 }
-function hsKey(d) { return `volleyshoot_highscore_${d}`; }
+function hsKey(d) { return `volleyshoot_highscore_${gameMode}_${d}`; }
 function getHighScore(d) { try { return Number(localStorage.getItem(hsKey(d))) || 0; } catch { return 0; } }
 function setHighScore(d, v) { try { localStorage.setItem(hsKey(d), String(v)); } catch {} }
 function vibrate(pattern) { try { navigator.vibrate && navigator.vibrate(pattern); } catch {} }
@@ -559,6 +587,19 @@ function footPoint(landmarks, ankleIdx, footIdx, heelIdx) {
   return { x, y };
 }
 
+function midScreen(lms, i1, i2) {
+  const a = lms[i1], b = lms[i2];
+  const vis = (p) => (p && (p.visibility === undefined || p.visibility > 0.4));
+  if (!vis(a) || !vis(b)) return null;
+  const pa = landmarkToScreen(a), pb = landmarkToScreen(b);
+  return { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
+}
+function singleScreen(lms, idx) {
+  const p = lms[idx];
+  const vis = (q) => (q && (q.visibility === undefined || q.visibility > 0.4));
+  if (!vis(p)) return null;
+  return landmarkToScreen(p);
+}
 function updatePose(nowMs) {
   if (!poseLandmarker || video.readyState < 2) return;
   if (video.currentTime === lastVideoTime) return;
@@ -568,56 +609,103 @@ function updatePose(nowMs) {
     result = poseLandmarker.detectForVideo(video, nowMs);
   } catch { return; }
   const lms = result && result.landmarks && result.landmarks[0];
+  const prevParts = bodyParts;
   prevFeet = { left: feet.left, right: feet.right };
-  if (!lms) { feet = { left: null, right: null }; return; }
+  if (!lms) { feet = { left: null, right: null }; bodyParts = {}; return; }
   poseSeenAt = nowMs;
-  const left = footPoint(lms, LM.L_ANKLE, LM.L_FOOT, LM.L_HEEL);
-  const right = footPoint(lms, LM.R_ANKLE, LM.R_FOOT, LM.R_HEEL);
   const dt = Math.max(16, nowMs - (feet.leftSeenAt || nowMs - 33)) / 1000;
   const speedOf = (cur, prev) => {
     if (!cur || !prev) return 0;
     return Math.hypot(cur.x - prev.x, cur.y - prev.y) / dt;
   };
-  feet = {
-    left: left ? { ...left, speed: speedOf(left, prevFeet.left) } : null,
-    right: right ? { ...right, speed: speedOf(right, prevFeet.right) } : null,
-    leftSeenAt: nowMs,
+  const withSpeed = (cur, prev) => (cur ? { ...cur, speed: speedOf(cur, prev) } : null);
+  // 各部位の打点を計算
+  const footL = footPoint(lms, LM.L_ANKLE, LM.L_FOOT, LM.L_HEEL);
+  const footR = footPoint(lms, LM.R_ANKLE, LM.R_FOOT, LM.R_HEEL);
+  const head = singleScreen(lms, LM.NOSE);              // 鼻=額の代表点
+  const shoulderL = singleScreen(lms, 11);
+  const shoulderR = singleScreen(lms, 12);
+  const thighL = midScreen(lms, LM.L_HIP, 25);          // 股関節と膝の中点
+  const thighR = midScreen(lms, LM.R_HIP, 26);
+  bodyParts = {
+    footL: withSpeed(footL, prevParts.footL),
+    footR: withSpeed(footR, prevParts.footR),
+    head: withSpeed(head, prevParts.head),
+    shoulderL: withSpeed(shoulderL, prevParts.shoulderL),
+    shoulderR: withSpeed(shoulderR, prevParts.shoulderR),
+    thighL: withSpeed(thighL, prevParts.thighL),
+    thighR: withSpeed(thighR, prevParts.thighR),
   };
+  feet = { left: bodyParts.footL, right: bodyParts.footR, leftSeenAt: nowMs };
+}
+function partCategory(key) {
+  if (key === "footL" || key === "footR") return "FOOT";
+  if (key === "head") return "HEAD";
+  if (key === "shoulderL" || key === "shoulderR") return "SHOULDER";
+  return "THIGH";
+}
+function partPointsOf(category) {
+  const map = { FOOT: ["footL","footR"], HEAD: ["head"], SHOULDER: ["shoulderL","shoulderR"], THIGH: ["thighL","thighR"] };
+  return map[category].map((k) => bodyParts[k]).filter(Boolean);
+}
+function pickRequiredPart() {
+  const r = Math.random();
+  let acc = 0;
+  for (const [k, w] of PART_WEIGHTS) { acc += w; if (r < acc) return k; }
+  return "FOOT";
 }
 
 /* ---------------- ボール ---------------- */
 function pickBallType() {
   const cfg = DIFFICULTY[difficulty];
   const r = Math.random();
-  if (r < cfg.goldRate) return "GOLD";
-  if (r < cfg.goldRate + cfg.blueRate) return "BLUE";
+  if (r < cfg.blackRate) return "BLACK";
+  if (r < cfg.blackRate + cfg.goldRate) return "GOLD";
+  if (r < cfg.blackRate + cfg.goldRate + cfg.blueRate) return "BLUE";
   return "NORMAL";
 }
 function spawnBall(nowMs) {
   const cfg = DIFFICULTY[difficulty];
-  if (nowMs - lastSpawn < cfg.spawnInterval) return;
+  const spawnIv = gameMode === "CONTROL" ? cfg.spawnInterval + 500 : cfg.spawnInterval;
+  if (nowMs - lastSpawn < spawnIv) return;
   lastSpawn = nowMs;
   const w = canvas.width, h = canvas.height;
   const fromLeft = Math.random() > 0.5;
   const type = pickBallType();
   const speedFactor = cfg.speedMin + Math.random() * (cfg.speedMax - cfg.speedMin);
   const typeSpeed = type === "BLUE" ? 1.25 : 1;
-  // 画面下の左右コーナーから、プレイヤーの足元〜腰の高さへ山なりに投げ込む
   const startX = fromLeft ? -40 : w + 40;
   const startY = h * (0.78 + Math.random() * 0.18);
-  const targetX = w * (0.3 + Math.random() * 0.4);
-  const apexY = h * (0.28 + Math.random() * 0.25); // 頂点の高さ
-  const flightTime = (1.9 - speedFactor) / typeSpeed; // 秒
-  const g = cfg.gravity * 1600 * DPR(); // px/s^2
-  // 放物線: 頂点の高さから初速を逆算
+  let targetX = w * (0.3 + Math.random() * 0.4);
+  let apexY = h * (0.28 + Math.random() * 0.25);
+  let requiredPart = null;
+  if (gameMode === "CONTROL" && type !== "BLACK") {
+    // 指示部位を決め、検出中の実際の部位の高さへ向けて投げる
+    requiredPart = pickRequiredPart();
+    const pts = partPointsOf(requiredPart);
+    if (pts.length > 0) {
+      const p = pts[Math.floor(Math.random() * pts.length)];
+      const d = DPR();
+      targetX = Math.max(w * 0.15, Math.min(w * 0.85, p.x + (Math.random() - 0.5) * 160 * d));
+      apexY = Math.max(h * 0.08, p.y - (50 + Math.random() * 90) * d); // 部位より少し上を頂点に
+    } else {
+      // 部位が未検出なら画面ゾーンで代用
+      const zone = { FOOT: 0.62, THIGH: 0.5, SHOULDER: 0.34, HEAD: 0.26 }[requiredPart];
+      apexY = h * (zone - 0.1);
+    }
+  }
+  const flightBase = gameMode === "CONTROL" ? 2.15 : 1.9; // コントロールは少し遅め
+  const flightTime = (flightBase - speedFactor) / typeSpeed;
+  const g = cfg.gravity * 1600 * DPR();
   const vy0 = -Math.sqrt(2 * g * Math.max(60, startY - apexY));
   const vx0 = (targetX - startX) / flightTime;
   const radius = BALL_RADIUS_BASE * DPR() * Math.min(1.25, Math.max(0.8, w / (420 * DPR()))) * (type === "GOLD" ? 0.92 : 1);
   balls.push({
     id: ballId++, x: startX, y: startY, vx: vx0, vy: vy0,
     radius, type, active: true, spin: 0, kicked: false, kickedVx: 0, kickedVy: 0,
+    requiredPart, faulted: false,
   });
-  totalBalls++;
+  if (type !== "BLACK") totalBalls++;
 }
 function updateBalls(dt, nowMs) {
   const cfg = DIFFICULTY[difficulty];
@@ -638,7 +726,7 @@ function updateBalls(dt, nowMs) {
   // 画面外に出たボールを除去(未キックはミス扱い→コンボ切れ)
   balls = balls.filter((b) => {
     const out = b.x < -140 || b.x > w + 140 || b.y > h + 140 || b.y < -240;
-    if (out && b.active && !b.kicked && phase === "playing") {
+    if (out && b.active && !b.kicked && phase === "playing" && b.type !== "BLACK") {
       combo = 0;
       updateComboBanner();
     }
@@ -646,18 +734,81 @@ function updateBalls(dt, nowMs) {
   });
   // 当たり判定
   if (phase !== "playing") return;
-  const hitFeet = [feet.left, feet.right].filter(Boolean);
-  if (hitFeet.length === 0) return;
-  for (const b of balls) {
-    if (!b.active || b.kicked) continue;
-    for (const f of hitFeet) {
-      const dist = Math.hypot(f.x - b.x, f.y - b.y);
-      if (dist <= cfg.hitRadius * DPR() + b.radius) {
-        onKick(b, f, nowMs);
-        break;
+  if (gameMode === "VOLLEY") {
+    const hitFeet = [feet.left, feet.right].filter(Boolean);
+    if (hitFeet.length === 0) return;
+    for (const b of balls) {
+      if (!b.active || b.kicked) continue;
+      for (const f of hitFeet) {
+        const dist = Math.hypot(f.x - b.x, f.y - b.y);
+        if (dist <= cfg.hitRadius * DPR() + b.radius) {
+          if (b.type === "BLACK") onBlackHit(b, nowMs);
+          else onKick(b, f, nowMs);
+          break;
+        }
+      }
+    }
+  } else {
+    // コントロールモード: 全部位で判定し、正しい部位かチェック
+    for (const b of balls) {
+      if (!b.active || b.kicked || b.faulted) continue;
+      let contact = null; // {key, part, dist}
+      for (const key of Object.keys(bodyParts)) {
+        const p = bodyParts[key];
+        if (!p) continue;
+        const cat = partCategory(key);
+        const r = cfg.hitRadius * DPR() * PARTS[cat].radiusScale;
+        const dist = Math.hypot(p.x - b.x, p.y - b.y);
+        if (dist <= r + b.radius && (!contact || dist < contact.dist)) {
+          contact = { key, part: p, dist, cat };
+        }
+      }
+      if (!contact) continue;
+      if (b.type === "BLACK") { onBlackHit(b, nowMs); continue; }
+      if (contact.cat === b.requiredPart) {
+        onKick(b, contact.part, nowMs);
+      } else {
+        onFault(b, contact.cat, nowMs);
       }
     }
   }
+}
+function onBlackHit(ball, nowMs) {
+  const cfg = DIFFICULTY[difficulty];
+  const penalty = Math.round(20 * cfg.multiplier);
+  score = Math.max(0, score - penalty);
+  penaltyCount++;
+  combo = 0;
+  updateComboBanner();
+  ball.kicked = true;
+  ball.active = false;
+  ball.kickedVx = (Math.random() - 0.5) * 500 * DPR();
+  ball.kickedVy = -(600 + Math.random() * 300) * DPR();
+  spawnBurst(ball.x, ball.y, "#FF4757", 22);
+  popups.push({ x: ball.x, y: ball.y - 20, text: `-${penalty}`, sub: "ペナルティ!", born: nowMs, life: 1000, color: "#FF4757" });
+  playBuzzer();
+  vibrate([80, 40, 80]);
+  scoreVal.textContent = String(score);
+}
+function onFault(ball, usedCat, nowMs) {
+  ball.faulted = true;
+  combo = 0;
+  updateComboBanner();
+  popups.push({ x: ball.x, y: ball.y - 20, text: "MISS", sub: `${PARTS[ball.requiredPart].label}で!`, born: nowMs, life: 900, color: "#9AA3B8" });
+  faultCount++;
+  playBeep(220, 0.15, 0.18);
+  vibrate(40);
+}
+function playBuzzer() {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+  o.type = "sawtooth"; o.frequency.setValueAtTime(160, t);
+  o.frequency.linearRampToValueAtTime(110, t + 0.3);
+  g.gain.setValueAtTime(0.22, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+  o.connect(g).connect(audioCtx.destination);
+  o.start(t); o.stop(t + 0.38);
 }
 function onKick(ball, foot, nowMs) {
   const cfg = DIFFICULTY[difficulty];
@@ -733,10 +884,64 @@ function updateParticles(dt) {
 }
 
 /* ---------------- 描画 ---------------- */
+function roundRect(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
+}
 function drawBall(b) {
+  const d = DPR();
+  // コントロールモード: ボール上部に指示部位ラベルとリングを描画
+  if (b.requiredPart && !b.kicked && !b.faulted) {
+    const pc = PARTS[b.requiredPart];
+    ctx.save();
+    ctx.strokeStyle = pc.color;
+    ctx.lineWidth = 3.5 * d;
+    ctx.shadowColor = pc.color;
+    ctx.shadowBlur = 10 * d;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.radius + 9 * d, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.shadowBlur = 4 * d;
+    ctx.textAlign = "center";
+    ctx.font = `800 ${15 * d}px 'M PLUS Rounded 1c', sans-serif`;
+    // ラベル背景
+    const label = pc.label;
+    const tw = ctx.measureText(label).width;
+    ctx.fillStyle = "rgba(11,16,38,0.85)";
+    const pad = 8 * d;
+    roundRect(ctx, b.x - tw / 2 - pad, b.y - b.radius - 38 * d, tw + pad * 2, 24 * d, 12 * d);
+    ctx.fill();
+    ctx.fillStyle = pc.color;
+    ctx.fillText(label, b.x, b.y - b.radius - 21 * d);
+    ctx.restore();
+  }
+  // 黒ボール: 警告リング
+  if (b.type === "BLACK" && !b.kicked) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,71,87,0.9)";
+    ctx.lineWidth = 3 * d;
+    ctx.setLineDash([6 * d, 6 * d]);
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.radius + 8 * d, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.textAlign = "center";
+    ctx.font = `800 ${13 * d}px 'M PLUS Rounded 1c', sans-serif`;
+    ctx.fillStyle = "#FF4757";
+    ctx.shadowColor = "rgba(0,0,0,0.7)";
+    ctx.shadowBlur = 4 * d;
+    ctx.fillText("さわるな!", b.x, b.y - b.radius - 14 * d);
+    ctx.restore();
+  }
   ctx.save();
   ctx.translate(b.x, b.y);
   ctx.rotate(b.spin);
+  ctx.globalAlpha = b.faulted ? 0.35 : 1;
   const t = BALL_TYPE[b.type];
   // グロー
   ctx.shadowColor = t.glow;
@@ -752,7 +957,7 @@ function drawBall(b) {
   ctx.fill();
   ctx.shadowBlur = 0;
   // サッカーボール風の五角形パッチ
-  ctx.fillStyle = b.type === "GOLD" ? "rgba(120,80,0,0.8)" : "rgba(11,16,38,0.85)";
+  ctx.fillStyle = b.type === "GOLD" ? "rgba(120,80,0,0.8)" : b.type === "BLACK" ? "rgba(255,71,87,0.55)" : "rgba(11,16,38,0.85)";
   const pent = (cx, cy, r) => {
     ctx.beginPath();
     for (let i = 0; i < 5; i++) {
@@ -832,6 +1037,36 @@ function drawParticles() {
   }
 }
 
+function drawAllParts(nowMs) {
+  const d = DPR();
+  const cfg = DIFFICULTY[difficulty];
+  for (const key of Object.keys(bodyParts)) {
+    const p = bodyParts[key];
+    if (!p) continue;
+    const cat = partCategory(key);
+    const pc = PARTS[cat];
+    const r = cfg.hitRadius * d * pc.radiusScale;
+    ctx.save();
+    ctx.strokeStyle = pc.color;
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = 2.5 * d;
+    ctx.setLineDash([6 * d, 8 * d]);
+    ctx.lineDashOffset = -((nowMs / 50) % 14) * d;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    ctx.shadowColor = pc.color;
+    ctx.shadowBlur = 12 * d;
+    ctx.fillStyle = pc.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 7 * d, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
 /* ---------------- ポジショニング判定 ---------------- */
 function handlePositioning(nowMs) {
   const bothFeet = feet.left && feet.right;
@@ -880,6 +1115,7 @@ function beginPlay() {
   playBeep(1320, 0.3, 0.25);
   const cfg = DIFFICULTY[difficulty];
   score = 0; hits = 0; totalBalls = 0; combo = 0; maxCombo = 0; perfectCount = 0;
+  penaltyCount = 0; faultCount = 0;
   balls = []; particles = []; popups = [];
   timeRemaining = cfg.timeLimit;
   lastSpawn = performance.now() - cfg.spawnInterval + 600; // 最初のボールは0.6秒後
@@ -908,13 +1144,15 @@ function endGame() {
   hide(flipBtn); hide(quitBtn);
 
   const rate = totalBalls > 0 ? Math.round((hits / totalBalls) * 100) : 0;
-  const rank = rate >= 85 && perfectCount >= hits * 0.4 ? "S" : rate >= 70 ? "A" : rate >= 45 ? "B" : "C";
+  const clean = penaltyCount === 0 && faultCount === 0;
+  const rank = rate >= 85 && clean && perfectCount >= hits * 0.3 ? "S" : rate >= 70 ? "A" : rate >= 45 ? "B" : "C";
   $("rank-badge").textContent = rank;
   $("result-score").textContent = String(score);
   $("r-hits").textContent = `${hits}/${totalBalls}`;
   $("r-rate").textContent = `${rate}%`;
   $("r-combo").textContent = String(maxCombo);
   $("r-perfect").textContent = String(perfectCount);
+  $("r-penalty").textContent = String(penaltyCount + faultCount);
   const prev = getHighScore(difficulty);
   if (score > prev) {
     setHighScore(difficulty, score);
@@ -1008,8 +1246,12 @@ function loop(nowMs) {
 
   // 描画
   for (const b of balls) drawBall(b);
-  drawFoot(feet.left, nowMs);
-  drawFoot(feet.right, nowMs);
+  if (gameMode === "VOLLEY" || phase === "positioning") {
+    drawFoot(feet.left, nowMs);
+    drawFoot(feet.right, nowMs);
+  } else {
+    drawAllParts(nowMs);
+  }
   drawParticles();
   drawPopups(nowMs);
 }
@@ -1017,18 +1259,28 @@ rafHandle = requestAnimationFrame(loop);
 
 /* ---------------- UIイベント ---------------- */
 function refreshHighScoreLine() {
-  $("highscore-line").textContent = `ハイスコア (${
-    difficulty === "EASY" ? "イージー" : difficulty === "NORMAL" ? "ノーマル" : "ハード"
-  }): ${getHighScore(difficulty)}`;
+  const modeName = gameMode === "VOLLEY" ? "ボレー" : "コントロール";
+  const diffName = difficulty === "EASY" ? "イージー" : difficulty === "NORMAL" ? "ノーマル" : "ハード";
+  $("highscore-line").textContent = `ハイスコア (${modeName}・${diffName}): ${getHighScore(difficulty)}`;
 }
-document.querySelectorAll(".diff-btn").forEach((btn) => {
+document.querySelectorAll("#difficulty-row .diff-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll(".diff-btn").forEach((b) => b.classList.remove("selected"));
+    document.querySelectorAll("#difficulty-row .diff-btn").forEach((b) => b.classList.remove("selected"));
     btn.classList.add("selected");
     difficulty = btn.dataset.diff;
     refreshHighScoreLine();
     initAudio();
     playBeep(740, 0.08, 0.1);
+  });
+});
+document.querySelectorAll("#mode-row .mode-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#mode-row .mode-btn").forEach((b) => b.classList.remove("selected"));
+    btn.classList.add("selected");
+    gameMode = btn.dataset.mode;
+    refreshHighScoreLine();
+    initAudio();
+    playBeep(880, 0.08, 0.1);
   });
 });
 $("start-btn").addEventListener("click", startGameFlow);
