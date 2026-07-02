@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { useTensorflowModel } from "react-native-fast-tflite";
 import { Camera, runAtTargetFps, useCameraDevice, useCameraPermission, useFrameProcessor } from "react-native-vision-camera";
 import { useRunOnJS, useSharedValue } from "react-native-worklets-core";
 import { useResizePlugin } from "vision-camera-resize-plugin";
@@ -20,6 +21,8 @@ type OnDeviceVolleyCameraProps = {
 
 const INPUT_WIDTH = 96;
 const INPUT_HEIGHT = 96;
+const MOVENET_INPUT_WIDTH = 192;
+const MOVENET_INPUT_HEIGHT = 192;
 const GRID_COLUMNS = 16;
 const GRID_ROWS = 12;
 const GRID_CELL_COUNT = GRID_COLUMNS * GRID_ROWS;
@@ -172,6 +175,7 @@ function detectFootCandidates(
 export function OnDeviceVolleyCamera({
   width,
   height,
+  modelAsset,
   showStatusBadge = false,
   onFootDetected,
   onFeetDetected,
@@ -180,6 +184,8 @@ export function OnDeviceVolleyCamera({
   const device = useCameraDevice("front");
   const { hasPermission, requestPermission } = useCameraPermission();
   const { resize } = useResizePlugin();
+  const modelState = useTensorflowModel(modelAsset ?? 0, []);
+  const tfliteModel = modelState.state === "loaded" ? modelState.model : undefined;
   const previousCells = useSharedValue<number[]>(Array(GRID_CELL_COUNT).fill(0));
   const reportFoot = useRunOnJS((x: number, y: number, confidence: number) => {
     onFootDetected?.({ x, y, confidence });
@@ -206,8 +212,20 @@ export function OnDeviceVolleyCamera({
   }, [onInferenceStatus]);
 
   useEffect(() => {
-    onInferenceStatus?.({ ready: true, confidence: 0 });
-  }, [onInferenceStatus]);
+    if (!modelAsset) {
+      onInferenceStatus?.({ ready: true, confidence: 0, error: "movenet-model-missing-fallback-active" });
+      return;
+    }
+    if (modelState.state === "loaded") {
+      onInferenceStatus?.({ ready: true, confidence: 0 });
+      return;
+    }
+    if (modelState.state === "error") {
+      onInferenceStatus?.({ ready: true, confidence: 0, error: modelState.error.message });
+      return;
+    }
+    onInferenceStatus?.({ ready: false, confidence: 0 });
+  }, [modelAsset, modelState, onInferenceStatus]);
 
   useEffect(() => {
     hasFeetReporter.value = Boolean(onFeetDetected);
@@ -225,6 +243,47 @@ export function OnDeviceVolleyCamera({
     "worklet";
     runAtTargetFps(24, () => {
       "worklet";
+      if (tfliteModel != null) {
+        const movenetInput = resize(frame, {
+          scale: { width: MOVENET_INPUT_WIDTH, height: MOVENET_INPUT_HEIGHT },
+          mirror: true,
+          pixelFormat: "rgb",
+          dataType: "uint8",
+        });
+
+        try {
+          const outputs = tfliteModel.runSync([movenetInput]);
+          const keypoints = outputs?.[0] as ArrayLike<number> | undefined;
+          if (keypoints != null && keypoints.length >= 51) {
+            const leftIndex = 15 * 3;
+            const rightIndex = 16 * 3;
+            const leftY = Number(keypoints[leftIndex]);
+            const leftX = Number(keypoints[leftIndex + 1]);
+            const leftScore = Number(keypoints[leftIndex + 2]);
+            const rightY = Number(keypoints[rightIndex]);
+            const rightX = Number(keypoints[rightIndex + 1]);
+            const rightScore = Number(keypoints[rightIndex + 2]);
+            const confidence = Math.max(leftScore, rightScore);
+            reportStatus(true, confidence);
+            reportFeet(
+              clamp01(leftX) * width,
+              clamp01(leftY) * height,
+              clamp01(leftScore),
+              clamp01(rightX) * width,
+              clamp01(rightY) * height,
+              clamp01(rightScore),
+            );
+            if (!hasFeetReporter.value && confidence >= FOOT_REPORT_THRESHOLD) {
+              if (leftScore >= rightScore) reportFoot(clamp01(leftX) * width, clamp01(leftY) * height, clamp01(leftScore));
+              else reportFoot(clamp01(rightX) * width, clamp01(rightY) * height, clamp01(rightScore));
+            }
+            return;
+          }
+        } catch (error) {
+          reportStatus(true, 0, "movenet-run-failed-fallback-active");
+        }
+      }
+
       const input = resize(frame, {
         scale: { width: INPUT_WIDTH, height: INPUT_HEIGHT },
         mirror: true,
@@ -250,7 +309,7 @@ export function OnDeviceVolleyCamera({
       if (hasFeetReporter.value || confidence < FOOT_REPORT_THRESHOLD) return;
       reportFoot(best.x * width, best.y * height, best.confidence);
     });
-  }, [hasFeetReporter, previousCells, reportFeet, reportFoot, reportStatus, resize, width, height]);
+  }, [hasFeetReporter, previousCells, reportFeet, reportFoot, reportStatus, resize, tfliteModel, width, height]);
 
   if (!hasPermission) {
     return (
@@ -280,7 +339,9 @@ export function OnDeviceVolleyCamera({
       {showStatusBadge && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>ON-DEVICE FOOT</Text>
-          <Text style={styles.badgeSubText}>foot motion tracking</Text>
+          <Text style={styles.badgeSubText}>
+            {modelState.state === "loaded" ? "MoveNet ankle tracking" : "motion fallback"}
+          </Text>
           <Text style={styles.badgeSubText}>
             frames off-device: {privacy.cameraFramesLeaveDevice ? "yes" : "no"}
           </Text>

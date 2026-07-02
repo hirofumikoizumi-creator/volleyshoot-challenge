@@ -190,9 +190,10 @@ export default function HomeScreen() {
                   <View style={styles.ruleContent}>
                     <Text style={styles.ruleTitle}>スコアシステム</Text>
                     <Text style={styles.ruleText}>
-                      • 通常のボール: +10点{'\n'}
-                      • 青いボール: -30点{'\n'}
-                      • 黄金のボール: +50点
+                      • 白: +10点{'\n'}
+                      • 青: +20点、高速{'\n'}
+                      • 金: +30点、レア{'\n'}
+                      • 黒: 蹴ると-20点、見逃すとボーナス
                     </Text>
                   </View>
                 </View>
@@ -202,7 +203,7 @@ export default function HomeScreen() {
                   <View style={styles.ruleContent}>
                     <Text style={styles.ruleTitle}>ゲーム時間</Text>
                     <Text style={styles.ruleText}>
-                      各難易度で異なる時間制限があります。時間内にできるだけ多くのボールをキックしてください。
+                      EASY/NORMALは60秒、HARDは45秒です。時間内にできるだけ多く正確にキックしてください。
                     </Text>
                   </View>
                 </View>
@@ -212,7 +213,7 @@ export default function HomeScreen() {
                   <View style={styles.ruleContent}>
                     <Text style={styles.ruleTitle}>コンボシステム</Text>
                     <Text style={styles.ruleText}>
-                      連続でボールをキックするとコンボが増加します。コンボが高いほどボーナスポイントが増えます。
+                      連続キックでコンボが増え、コンボ数に応じてボーナスポイントが加算されます。
                     </Text>
                   </View>
                 </View>
@@ -220,9 +221,9 @@ export default function HomeScreen() {
                 <View style={styles.ruleItem}>
                   <Text style={styles.ruleNumber}>4</Text>
                   <View style={styles.ruleContent}>
-                    <Text style={styles.ruleTitle}>カメラ権限</Text>
+                    <Text style={styles.ruleTitle}>キック判定</Text>
                     <Text style={styles.ruleText}>
-                      ゲームプレイにはカメラへのアクセス権限が必要です。初回起動時に許可してください。
+                      足の速度が320px/s未満ならタッチ扱い、900px/s以上ならPERFECTです。カメラ権限が必要です。
                     </Text>
                   </View>
                 </View>

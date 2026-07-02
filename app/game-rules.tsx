@@ -3,7 +3,7 @@ import { ScrollView, Text, View, TouchableOpacity, StyleSheet } from 'react-nati
 import { ScreenContainer } from '@/components/screen-container';
 import { useRouter } from 'expo-router';
 import { useGameContext } from '@/lib/game-context';
-import { DIFFICULTY_CONFIG, BALL_TYPE_CONFIG } from '@/lib/game-config';
+import { BALL_TYPE_CONFIG, DIFFICULTY_CONFIG } from '@/lib/game-config';
 
 export default function GameRulesScreen() {
   const router = useRouter();
@@ -34,8 +34,8 @@ export default function GameRulesScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>📋 ゲーム説明</Text>
             <Text style={styles.sectionText}>
-              60秒間で、飛んでくるボールをキックしてスコアを稼ぎます。{'\n'}
-              足首でボールをキックするとスコアが加算されます。
+              カメラの前に立ち、飛んでくるボールを実際に足でキックします。{'\n'}
+              足の振りが速いほど高評価になり、PERFECTは得点が1.5倍になります。
             </Text>
           </View>
 
@@ -47,23 +47,31 @@ export default function GameRulesScreen() {
               <View style={[styles.ballCircle, { backgroundColor: '#FFFFFF' }]} />
               <View style={styles.scoreItemText}>
                 <Text style={styles.scoreItemName}>通常ボール</Text>
-                <Text style={styles.scoreItemPoints}>+10 点</Text>
+                <Text style={styles.scoreItemPoints}>+{BALL_TYPE_CONFIG.NORMAL.points} 点</Text>
               </View>
             </View>
 
             <View style={styles.scoreItem}>
               <View style={[styles.ballCircle, { backgroundColor: '#0099FF' }]} />
               <View style={styles.scoreItemText}>
-                <Text style={styles.scoreItemName}>青ボール（レア）</Text>
-                <Text style={styles.scoreItemPoints}>-30 点</Text>
+                <Text style={styles.scoreItemName}>青ボール（高速）</Text>
+                <Text style={styles.scoreItemPoints}>+{BALL_TYPE_CONFIG.BLUE.points} 点</Text>
               </View>
             </View>
 
             <View style={styles.scoreItem}>
               <View style={[styles.ballCircle, { backgroundColor: '#FFD700' }]} />
               <View style={styles.scoreItemText}>
-                <Text style={styles.scoreItemName}>黄金ボール（超レア）</Text>
-                <Text style={styles.scoreItemPoints}>+50 点</Text>
+                <Text style={styles.scoreItemName}>金ボール（レア）</Text>
+                <Text style={styles.scoreItemPoints}>+{BALL_TYPE_CONFIG.GOLD.points} 点</Text>
+              </View>
+            </View>
+
+            <View style={styles.scoreItem}>
+              <View style={[styles.ballCircle, { backgroundColor: BALL_TYPE_CONFIG.BLACK.color }]} />
+              <View style={styles.scoreItemText}>
+                <Text style={styles.scoreItemName}>黒ボール（蹴るな）</Text>
+                <Text style={styles.scoreItemPoints}>{BALL_TYPE_CONFIG.BLACK.points} 点 / 見逃しボーナス</Text>
               </View>
             </View>
           </View>
@@ -84,8 +92,12 @@ export default function GameRulesScreen() {
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>ボール速度:</Text>
               <Text style={styles.infoValue}>
-                {difficultyConfig.initialSpeed.min}-{difficultyConfig.initialSpeed.max}
+                {difficultyConfig.speedMin}-{difficultyConfig.speedMax}
               </Text>
+            </View>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>判定半径:</Text>
+              <Text style={styles.infoValue}>{Math.round(difficultyConfig.hitRadius)} px</Text>
             </View>
           </View>
 
@@ -94,8 +106,9 @@ export default function GameRulesScreen() {
             <Text style={styles.sectionTitle}>⚠️ 注意事項</Text>
             <Text style={styles.warningText}>
               • 十分なスペースを確保してください{'\n'}
-              • カメラがボールを捉えられるようにしてください{'\n'}
-              • 足首でボールをキックしてください
+              • フロントカメラに全身が入る位置で遊んでください{'\n'}
+              • 足首の検出点で判定します{'\n'}
+              • 黒ボールは蹴らずに見逃すとボーナスです
             </Text>
           </View>
 

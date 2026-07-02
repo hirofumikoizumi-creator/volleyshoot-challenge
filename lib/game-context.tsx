@@ -8,6 +8,13 @@ export interface GameState {
   successCount: number;
   totalBalls: number;
   maxCombo: number;
+  perfectCount?: number;
+  penaltyCount?: number;
+  leftHits?: number;
+  rightHits?: number;
+  blackSafeCount?: number;
+  niceThroughCount?: number;
+  averageReactionTime?: number | null;
 }
 
 interface GameContextType {

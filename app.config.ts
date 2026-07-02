@@ -48,7 +48,8 @@ const config: ExpoConfig = {
     bundleIdentifier: env.iosBundleId,
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
-      NSCameraUsageDescription: "このアプリはボール検知とユーザーのキック動作を認識するためにカメラを使用します。",
+      NSCameraUsageDescription:
+        "ボレーシュートの練習のため、カメラを使ってリアルタイムで足の動きを検出します。映像はデバイス内でのみ処理され、外部に送信されません。",
       NSLocationWhenInUseUsageDescription:
         "このアプリは位置情報を取得・保存・送信しません。一部のiOSライブラリが位置情報APIを参照する場合に備え、ユーザーのプライバシー保護のためこの説明を表示します。",
       NSMicrophoneUsageDescription: "オーディオ処理用にマイクへのアクセスが必要です。",
