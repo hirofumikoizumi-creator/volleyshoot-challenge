@@ -1,0 +1,1069 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#0B1026" />
+<title>ボレーシュート チャレンジ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bungee&family=M+PLUS+Rounded+1c:wght@500;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --navy: #0B1026;
+    --navy-glass: rgba(11, 16, 38, 0.78);
+    --white: #F5F8FF;
+    --cyan: #23E0FF;
+    --gold: #FFC53D;
+    --red: #FF4757;
+    --hud-font: 'Bungee', 'M PLUS Rounded 1c', sans-serif;
+    --body-font: 'M PLUS Rounded 1c', sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: var(--navy);
+    color: var(--white);
+    font-family: var(--body-font);
+    touch-action: none;
+    overscroll-behavior: none;
+  }
+  #stage { position: fixed; inset: 0; }
+  #video {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    background: #000;
+  }
+  #video.mirrored { transform: scaleX(-1); }
+  #canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  /* ===== 共通オーバーレイ ===== */
+  .screen {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 18px;
+    padding: max(20px, env(safe-area-inset-top)) 24px max(28px, env(safe-area-inset-bottom));
+    background:
+      radial-gradient(120% 90% at 50% -10%, rgba(35, 224, 255, 0.14), transparent 55%),
+      linear-gradient(180deg, rgba(11,16,38,0.94) 0%, rgba(11,16,38,0.86) 100%);
+    text-align: center;
+    z-index: 20;
+    transition: opacity .25s ease;
+  }
+  .screen.hidden { opacity: 0; pointer-events: none; }
+
+  .eyebrow {
+    font-family: var(--body-font); font-weight: 700;
+    font-size: 12px; letter-spacing: .35em;
+    color: var(--cyan);
+  }
+  h1.title {
+    font-family: var(--hud-font);
+    font-size: clamp(30px, 9vw, 56px);
+    line-height: 1.05;
+    color: var(--white);
+    text-shadow: 0 0 22px rgba(35,224,255,.55), 0 4px 0 rgba(0,0,0,.35);
+  }
+  h1.title .gold { color: var(--gold); text-shadow: 0 0 22px rgba(255,197,61,.6), 0 4px 0 rgba(0,0,0,.35); }
+  .subtitle { font-weight: 500; font-size: 14px; color: rgba(245,248,255,.82); max-width: 420px; line-height: 1.8; }
+
+  .btn {
+    font-family: var(--body-font); font-weight: 800;
+    font-size: 17px;
+    color: var(--navy);
+    background: linear-gradient(180deg, #5FEBFF 0%, var(--cyan) 100%);
+    border: none; border-radius: 999px;
+    padding: 15px 44px;
+    cursor: pointer;
+    box-shadow: 0 6px 0 rgba(9, 92, 110, .9), 0 10px 26px rgba(35,224,255,.35);
+    transition: transform .08s ease, box-shadow .08s ease;
+  }
+  .btn:active { transform: translateY(4px); box-shadow: 0 2px 0 rgba(9,92,110,.9), 0 6px 14px rgba(35,224,255,.3); }
+  .btn.gold {
+    background: linear-gradient(180deg, #FFDD7E 0%, var(--gold) 100%);
+    box-shadow: 0 6px 0 rgba(140, 96, 6, .9), 0 10px 26px rgba(255,197,61,.35);
+  }
+  .btn.ghost {
+    background: transparent; color: var(--white);
+    border: 2px solid rgba(245,248,255,.45);
+    box-shadow: none; font-weight: 700; font-size: 15px; padding: 12px 32px;
+  }
+  .btn:disabled { opacity: .45; pointer-events: none; }
+
+  /* 難易度セレクタ */
+  .difficulty-row { display: flex; gap: 10px; }
+  .diff-btn {
+    font-family: var(--body-font); font-weight: 800; font-size: 14px;
+    color: rgba(245,248,255,.75);
+    background: rgba(245,248,255,.06);
+    border: 2px solid rgba(245,248,255,.22);
+    border-radius: 14px;
+    padding: 12px 18px;
+    cursor: pointer;
+    min-width: 96px;
+    transition: all .12s ease;
+  }
+  .diff-btn small { display: block; font-weight: 500; font-size: 10px; margin-top: 3px; letter-spacing: .06em; color: rgba(245,248,255,.5); }
+  .diff-btn.selected {
+    color: var(--navy);
+    background: var(--cyan);
+    border-color: var(--cyan);
+    box-shadow: 0 0 18px rgba(35,224,255,.5);
+  }
+  .diff-btn.selected small { color: rgba(11,16,38,.65); }
+
+  .highscore-line { font-size: 13px; font-weight: 700; color: var(--gold); letter-spacing: .08em; }
+
+  .howto {
+    display: grid; gap: 8px;
+    font-size: 13px; font-weight: 500;
+    color: rgba(245,248,255,.8);
+    background: rgba(245,248,255,.05);
+    border: 1px solid rgba(245,248,255,.14);
+    border-radius: 16px;
+    padding: 14px 18px;
+    max-width: 430px;
+    text-align: left;
+    line-height: 1.7;
+  }
+  .howto b { color: var(--cyan); font-weight: 800; }
+
+  /* ===== ゲーム中 HUD ===== */
+  #hud {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: calc(env(safe-area-inset-top) + 10px) 14px 10px;
+    display: flex; align-items: stretch; justify-content: space-between; gap: 10px;
+    z-index: 10;
+    pointer-events: none;
+  }
+  #hud.hidden { display: none; }
+  .hud-cell {
+    background: var(--navy-glass);
+    border: 1px solid rgba(35,224,255,.35);
+    border-radius: 14px;
+    padding: 8px 14px;
+    min-width: 92px;
+    text-align: center;
+    backdrop-filter: blur(6px);
+  }
+  .hud-label { font-size: 10px; font-weight: 700; letter-spacing: .25em; color: rgba(245,248,255,.6); }
+  .hud-value { font-family: var(--hud-font); font-size: 24px; color: var(--white); line-height: 1.15; }
+  #hud-score .hud-value { color: var(--gold); text-shadow: 0 0 12px rgba(255,197,61,.5); }
+  #hud-time.warn .hud-value { color: var(--red); text-shadow: 0 0 12px rgba(255,71,87,.6); animation: pulse .6s infinite alternate; }
+  @keyframes pulse { from { opacity: 1; } to { opacity: .55; } }
+
+  #combo-banner {
+    position: absolute; top: 22%; left: 0; right: 0;
+    text-align: center; z-index: 9; pointer-events: none;
+    opacity: 0; transition: opacity .18s ease;
+  }
+  #combo-banner.show { opacity: 1; }
+  #combo-banner .combo-num {
+    font-family: var(--hud-font);
+    font-size: clamp(44px, 13vw, 84px);
+    color: var(--gold);
+    text-shadow: 0 0 26px rgba(255,197,61,.75), 0 5px 0 rgba(0,0,0,.4);
+  }
+  #combo-banner .combo-word {
+    font-family: var(--hud-font); font-size: 16px; color: var(--cyan);
+    letter-spacing: .3em; text-shadow: 0 0 12px rgba(35,224,255,.7);
+  }
+
+  #flip-btn, #quit-btn {
+    position: absolute; z-index: 15;
+    bottom: calc(env(safe-area-inset-bottom) + 16px);
+    background: var(--navy-glass);
+    border: 1px solid rgba(245,248,255,.3);
+    color: var(--white);
+    font-family: var(--body-font); font-weight: 700; font-size: 13px;
+    border-radius: 999px; padding: 10px 18px; cursor: pointer;
+    backdrop-filter: blur(6px);
+  }
+  #flip-btn { right: 14px; }
+  #quit-btn { left: 14px; }
+  #flip-btn.hidden, #quit-btn.hidden { display: none; }
+
+  /* ポジショニングガイド */
+  #positioning-msg {
+    position: absolute; left: 0; right: 0;
+    bottom: calc(env(safe-area-inset-bottom) + 84px);
+    text-align: center; z-index: 12; pointer-events: none;
+  }
+  #positioning-msg.hidden { display: none; }
+  #positioning-msg .msg-pill {
+    display: inline-block;
+    background: var(--navy-glass);
+    border: 1px solid rgba(35,224,255,.4);
+    border-radius: 999px;
+    padding: 12px 22px;
+    font-weight: 700; font-size: 14px;
+    backdrop-filter: blur(6px);
+  }
+  #positioning-msg .msg-pill.ok { border-color: var(--gold); color: var(--gold); }
+
+  #countdown {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 14; pointer-events: none;
+  }
+  #countdown.hidden { display: none; }
+  #countdown span {
+    font-family: var(--hud-font);
+    font-size: clamp(90px, 30vw, 180px);
+    color: var(--white);
+    text-shadow: 0 0 40px rgba(35,224,255,.8), 0 8px 0 rgba(0,0,0,.4);
+  }
+
+  /* 結果画面 */
+  .rank-badge {
+    font-family: var(--hud-font);
+    font-size: clamp(72px, 22vw, 130px);
+    line-height: 1;
+    color: var(--gold);
+    text-shadow: 0 0 36px rgba(255,197,61,.8), 0 6px 0 rgba(0,0,0,.4);
+  }
+  .result-score {
+    font-family: var(--hud-font);
+    font-size: clamp(40px, 12vw, 68px);
+    color: var(--white);
+    text-shadow: 0 0 18px rgba(35,224,255,.5);
+  }
+  .result-stats {
+    display: flex; gap: 12px; flex-wrap: wrap; justify-content: center;
+  }
+  .stat-box {
+    background: rgba(245,248,255,.06);
+    border: 1px solid rgba(245,248,255,.18);
+    border-radius: 14px;
+    padding: 10px 18px; min-width: 100px;
+  }
+  .stat-box .s-label { font-size: 10px; font-weight: 700; letter-spacing: .2em; color: rgba(245,248,255,.6); }
+  .stat-box .s-value { font-family: var(--hud-font); font-size: 22px; color: var(--cyan); }
+  .newrecord { font-weight: 800; color: var(--gold); font-size: 15px; letter-spacing: .1em; animation: pulse .5s infinite alternate; }
+  .newrecord.hidden { display: none; }
+
+  #loading-note { font-size: 12px; color: rgba(245,248,255,.6); font-weight: 500; }
+  .spinner {
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    border: 4px solid rgba(35,224,255,.2);
+    border-top-color: var(--cyan);
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #error-box {
+    background: rgba(255,71,87,.12);
+    border: 1px solid rgba(255,71,87,.5);
+    border-radius: 14px;
+    padding: 14px 18px;
+    font-size: 13px; font-weight: 500; line-height: 1.7;
+    max-width: 420px; color: #FFD3D8;
+  }
+  #error-box.hidden { display: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="video" autoplay muted playsinline></video>
+  <canvas id="canvas"></canvas>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div class="hud-cell" id="hud-score"><div class="hud-label">SCORE</div><div class="hud-value" id="score-val">0</div></div>
+    <div class="hud-cell" id="hud-time"><div class="hud-label">TIME</div><div class="hud-value" id="time-val">60</div></div>
+    <div class="hud-cell" id="hud-hits"><div class="hud-label">HIT</div><div class="hud-value" id="hits-val">0</div></div>
+  </div>
+  <div id="combo-banner"><div class="combo-num" id="combo-num">2</div><div class="combo-word">COMBO</div></div>
+
+  <div id="positioning-msg" class="hidden"><span class="msg-pill" id="positioning-pill">両足がカメラに映る位置に立ってください</span></div>
+  <div id="countdown" class="hidden"><span id="countdown-num">3</span></div>
+
+  <button id="flip-btn" class="hidden">カメラ切替</button>
+  <button id="quit-btn" class="hidden">やめる</button>
+
+  <!-- スタート画面 -->
+  <div id="screen-start" class="screen">
+    <div class="eyebrow">VOLLEY TRAINING GAME</div>
+    <h1 class="title">ボレーシュート<br /><span class="gold">チャレンジ</span></h1>
+    <p class="subtitle">カメラの前に立って、画面に飛んでくるボールを実際に足で蹴ろう。AIがあなたの足の動きをリアルタイムで検出します。</p>
+    <div class="difficulty-row" id="difficulty-row">
+      <button class="diff-btn" data-diff="EASY">イージー<small>60秒・ゆっくり</small></button>
+      <button class="diff-btn selected" data-diff="NORMAL">ノーマル<small>60秒・標準</small></button>
+      <button class="diff-btn" data-diff="HARD">ハード<small>45秒・高速</small></button>
+    </div>
+    <div class="highscore-line" id="highscore-line">ハイスコア: 0</div>
+    <div class="howto">
+      <div><b>1.</b> スマホを床や台に立てかけて固定する</div>
+      <div><b>2.</b> 2〜3歩下がって、<b>足元まで全身</b>が映るようにする</div>
+      <div><b>3.</b> 飛んでくるボールに足を合わせてキック!素早く振るほど <b>PERFECT</b> で高得点</div>
+    </div>
+    <button class="btn gold" id="start-btn">ゲームスタート</button>
+    <div id="error-box" class="hidden"></div>
+  </div>
+
+  <!-- ローディング画面 -->
+  <div id="screen-loading" class="screen hidden">
+    <div class="spinner"></div>
+    <div class="subtitle" id="loading-text">AIモデルを読み込んでいます…</div>
+    <div id="loading-note">初回は数秒かかります(モデルは端末内で動作し、映像は送信されません)</div>
+  </div>
+
+  <!-- 結果画面 -->
+  <div id="screen-result" class="screen hidden">
+    <div class="eyebrow">RESULT</div>
+    <div class="rank-badge" id="rank-badge">A</div>
+    <div class="result-score" id="result-score">1250</div>
+    <div class="newrecord hidden" id="newrecord">★ ニューレコード! ★</div>
+    <div class="result-stats">
+      <div class="stat-box"><div class="s-label">成功数</div><div class="s-value" id="r-hits">0</div></div>
+      <div class="stat-box"><div class="s-label">成功率</div><div class="s-value" id="r-rate">0%</div></div>
+      <div class="stat-box"><div class="s-label">最大コンボ</div><div class="s-value" id="r-combo">0</div></div>
+      <div class="stat-box"><div class="s-label">PERFECT</div><div class="s-value" id="r-perfect">0</div></div>
+    </div>
+    <button class="btn" id="replay-btn">もう一度プレイ</button>
+    <button class="btn ghost" id="home-btn">ホームに戻る</button>
+  </div>
+</div>
+
+<script type="module">
+/* =========================================================================
+ * ボレーシュート チャレンジ — Web版 完全実装
+ * 骨格検出: MediaPipe Tasks Vision PoseLandmarker (端末内で動作)
+ * ========================================================================= */
+import {
+  FilesetResolver,
+  PoseLandmarker,
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+/* ---------------- 定数・難易度設定 ---------------- */
+const DIFFICULTY = {
+  EASY:   { timeLimit: 60, spawnInterval: 2300, speedMin: 0.42, speedMax: 0.58, gravity: 0.62, hitRadius: 78, blueRate: 0.00, goldRate: 0.08, multiplier: 1.0 },
+  NORMAL: { timeLimit: 60, spawnInterval: 1750, speedMin: 0.52, speedMax: 0.72, gravity: 0.72, hitRadius: 62, blueRate: 0.12, goldRate: 0.08, multiplier: 1.5 },
+  HARD:   { timeLimit: 45, spawnInterval: 1300, speedMin: 0.62, speedMax: 0.88, gravity: 0.82, hitRadius: 50, blueRate: 0.20, goldRate: 0.10, multiplier: 2.0 },
+};
+const BALL_TYPE = {
+  NORMAL: { points: 10, color: "#F5F8FF", glow: "rgba(245,248,255,0.9)" },
+  BLUE:   { points: 20, color: "#3B9CFF", glow: "rgba(59,156,255,0.95)" },
+  GOLD:   { points: 30, color: "#FFC53D", glow: "rgba(255,197,61,0.95)" },
+};
+const PERFECT_FOOT_SPEED = 900;   // px/s 以上の振り足で PERFECT
+const COMBO_TIMEOUT = 2600;       // ms
+const BALL_RADIUS_BASE = 26;      // px (画面幅で微調整)
+// MediaPipe Pose ランドマーク index
+const LM = { L_ANKLE: 27, R_ANKLE: 28, L_HEEL: 29, R_HEEL: 30, L_FOOT: 31, R_FOOT: 32, NOSE: 0, L_HIP: 23, R_HIP: 24 };
+
+/* ---------------- DOM ---------------- */
+const $ = (id) => document.getElementById(id);
+const video = $("video"), canvas = $("canvas"), ctx = canvas.getContext("2d");
+const screens = { start: $("screen-start"), loading: $("screen-loading"), result: $("screen-result") };
+const hud = $("hud"), scoreVal = $("score-val"), timeVal = $("time-val"), hitsVal = $("hits-val");
+const hudTime = $("hud-time");
+const comboBanner = $("combo-banner"), comboNum = $("combo-num");
+const positioningMsg = $("positioning-msg"), positioningPill = $("positioning-pill");
+const countdownEl = $("countdown"), countdownNum = $("countdown-num");
+const flipBtn = $("flip-btn"), quitBtn = $("quit-btn");
+const errorBox = $("error-box");
+
+/* ---------------- 状態 ---------------- */
+let phase = "start"; // start | loading | positioning | countdown | playing | result
+let difficulty = "NORMAL";
+let facingMode = "environment";
+let mirrored = false;
+let poseLandmarker = null;
+let stream = null;
+let lastVideoTime = -1;
+
+let feet = { left: null, right: null }; // {x,y,speed,seenAt}
+let prevFeet = { left: null, right: null };
+let poseSeenAt = 0;
+
+let balls = [];
+let particles = [];
+let popups = [];
+let ballId = 0;
+let lastSpawn = 0;
+
+let score = 0, hits = 0, totalBalls = 0, combo = 0, maxCombo = 0, perfectCount = 0;
+let lastHitAt = 0;
+let timeRemaining = 60;
+let timerHandle = null;
+let positioningStableSince = 0;
+let rafHandle = null;
+let lastFrameTs = 0;
+
+/* ---------------- ユーティリティ ---------------- */
+const DPR = () => Math.min(2, window.devicePixelRatio || 1);
+function show(el) { el.classList.remove("hidden"); }
+function hide(el) { el.classList.add("hidden"); }
+function setScreen(name) {
+  for (const key of Object.keys(screens)) {
+    if (key === name) show(screens[key]); else hide(screens[key]);
+  }
+}
+function hsKey(d) { return `volleyshoot_highscore_${d}`; }
+function getHighScore(d) { try { return Number(localStorage.getItem(hsKey(d))) || 0; } catch { return 0; } }
+function setHighScore(d, v) { try { localStorage.setItem(hsKey(d), String(v)); } catch {} }
+function vibrate(pattern) { try { navigator.vibrate && navigator.vibrate(pattern); } catch {} }
+
+/* ---------------- サウンド(WebAudioで合成、素材ファイル不要) ---------------- */
+let audioCtx = null;
+function initAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch {}
+  }
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+}
+function playKickSound(perfect) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  // ドスッというキック音: ノイズバースト + ピッチ降下
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(perfect ? 340 : 240, t);
+  osc.frequency.exponentialRampToValueAtTime(60, t + 0.16);
+  gain.gain.setValueAtTime(0.5, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start(t); osc.stop(t + 0.22);
+  if (perfect) {
+    const o2 = audioCtx.createOscillator(); const g2 = audioCtx.createGain();
+    o2.type = "triangle";
+    o2.frequency.setValueAtTime(880, t + 0.02);
+    o2.frequency.exponentialRampToValueAtTime(1760, t + 0.12);
+    g2.gain.setValueAtTime(0.18, t + 0.02);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+    o2.connect(g2).connect(audioCtx.destination);
+    o2.start(t + 0.02); o2.stop(t + 0.27);
+  }
+}
+function playComboSound(n) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  [523.25, 659.25, 783.99].forEach((f, i) => {
+    const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+    o.type = "square"; o.frequency.value = f * (1 + Math.min(n, 20) * 0.01);
+    g.gain.setValueAtTime(0.08, t + i * 0.07);
+    g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.07 + 0.18);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t + i * 0.07); o.stop(t + i * 0.07 + 0.2);
+  });
+}
+function playBeep(freq, dur = 0.12, vol = 0.2) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+  o.type = "sine"; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(audioCtx.destination);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+function playWhistle() {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  [0, 0.28].forEach((delay, i) => {
+    const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+    o.type = "square"; o.frequency.value = i === 0 ? 2200 : 2400;
+    g.gain.setValueAtTime(0.12, t + delay);
+    g.gain.setValueAtTime(0.12, t + delay + 0.18);
+    g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.24);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t + delay); o.stop(t + delay + 0.26);
+  });
+}
+
+/* ---------------- カメラ ---------------- */
+async function startCamera() {
+  stopCamera();
+  const constraints = {
+    audio: false,
+    video: {
+      facingMode: { ideal: facingMode },
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+    },
+  };
+  stream = await navigator.mediaDevices.getUserMedia(constraints);
+  video.srcObject = stream;
+  await new Promise((res) => {
+    if (video.readyState >= 2) return res();
+    video.onloadeddata = () => res();
+  });
+  await video.play();
+  // 実際に取得できたカメラの向きを確認
+  const track = stream.getVideoTracks()[0];
+  const settings = track.getSettings ? track.getSettings() : {};
+  const actualFacing = settings.facingMode || facingMode;
+  mirrored = actualFacing === "user";
+  video.classList.toggle("mirrored", mirrored);
+}
+function stopCamera() {
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+}
+
+/* ---------------- 骨格検出モデル ---------------- */
+async function loadModel() {
+  if (poseLandmarker) return;
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+  poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+      delegate: "GPU",
+    },
+    runningMode: "VIDEO",
+    numPoses: 1,
+    minPoseDetectionConfidence: 0.5,
+    minPosePresenceConfidence: 0.5,
+    minTrackingConfidence: 0.5,
+  });
+}
+
+/* ---------------- 座標変換 (object-fit: cover 対応) ---------------- */
+function landmarkToScreen(lm) {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const cw = canvas.width, ch = canvas.height;
+  if (!vw || !vh) return { x: 0, y: 0 };
+  const scale = Math.max(cw / vw, ch / vh);
+  const dispW = vw * scale, dispH = vh * scale;
+  const offX = (cw - dispW) / 2, offY = (ch - dispH) / 2;
+  let x = lm.x * dispW + offX;
+  const y = lm.y * dispH + offY;
+  if (mirrored) x = cw - x;
+  return { x, y };
+}
+
+/* ---------------- 足の検出・追跡 ---------------- */
+function footPoint(landmarks, ankleIdx, footIdx, heelIdx) {
+  const a = landmarks[ankleIdx], f = landmarks[footIdx], h = landmarks[heelIdx];
+  const vis = (p) => (p && (p.visibility === undefined || p.visibility > 0.4));
+  if (!vis(a) && !vis(f)) return null;
+  // つま先寄り(足の甲=インステップ)を打点にする
+  const pts = [];
+  if (vis(a)) pts.push(landmarkToScreen(a));
+  if (vis(f)) { const p = landmarkToScreen(f); pts.push(p, p); } // つま先を重み2
+  if (vis(h)) pts.push(landmarkToScreen(h));
+  const x = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+  const y = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+  return { x, y };
+}
+
+function updatePose(nowMs) {
+  if (!poseLandmarker || video.readyState < 2) return;
+  if (video.currentTime === lastVideoTime) return;
+  lastVideoTime = video.currentTime;
+  let result;
+  try {
+    result = poseLandmarker.detectForVideo(video, nowMs);
+  } catch { return; }
+  const lms = result && result.landmarks && result.landmarks[0];
+  prevFeet = { left: feet.left, right: feet.right };
+  if (!lms) { feet = { left: null, right: null }; return; }
+  poseSeenAt = nowMs;
+  const left = footPoint(lms, LM.L_ANKLE, LM.L_FOOT, LM.L_HEEL);
+  const right = footPoint(lms, LM.R_ANKLE, LM.R_FOOT, LM.R_HEEL);
+  const dt = Math.max(16, nowMs - (feet.leftSeenAt || nowMs - 33)) / 1000;
+  const speedOf = (cur, prev) => {
+    if (!cur || !prev) return 0;
+    return Math.hypot(cur.x - prev.x, cur.y - prev.y) / dt;
+  };
+  feet = {
+    left: left ? { ...left, speed: speedOf(left, prevFeet.left) } : null,
+    right: right ? { ...right, speed: speedOf(right, prevFeet.right) } : null,
+    leftSeenAt: nowMs,
+  };
+}
+
+/* ---------------- ボール ---------------- */
+function pickBallType() {
+  const cfg = DIFFICULTY[difficulty];
+  const r = Math.random();
+  if (r < cfg.goldRate) return "GOLD";
+  if (r < cfg.goldRate + cfg.blueRate) return "BLUE";
+  return "NORMAL";
+}
+function spawnBall(nowMs) {
+  const cfg = DIFFICULTY[difficulty];
+  if (nowMs - lastSpawn < cfg.spawnInterval) return;
+  lastSpawn = nowMs;
+  const w = canvas.width, h = canvas.height;
+  const fromLeft = Math.random() > 0.5;
+  const type = pickBallType();
+  const speedFactor = cfg.speedMin + Math.random() * (cfg.speedMax - cfg.speedMin);
+  const typeSpeed = type === "BLUE" ? 1.25 : 1;
+  // 画面下の左右コーナーから、プレイヤーの足元〜腰の高さへ山なりに投げ込む
+  const startX = fromLeft ? -40 : w + 40;
+  const startY = h * (0.78 + Math.random() * 0.18);
+  const targetX = w * (0.3 + Math.random() * 0.4);
+  const apexY = h * (0.28 + Math.random() * 0.25); // 頂点の高さ
+  const flightTime = (1.9 - speedFactor) / typeSpeed; // 秒
+  const g = cfg.gravity * 1600 * DPR(); // px/s^2
+  // 放物線: 頂点の高さから初速を逆算
+  const vy0 = -Math.sqrt(2 * g * Math.max(60, startY - apexY));
+  const vx0 = (targetX - startX) / flightTime;
+  const radius = BALL_RADIUS_BASE * DPR() * Math.min(1.25, Math.max(0.8, w / (420 * DPR()))) * (type === "GOLD" ? 0.92 : 1);
+  balls.push({
+    id: ballId++, x: startX, y: startY, vx: vx0, vy: vy0,
+    radius, type, active: true, spin: 0, kicked: false, kickedVx: 0, kickedVy: 0,
+  });
+  totalBalls++;
+}
+function updateBalls(dt, nowMs) {
+  const cfg = DIFFICULTY[difficulty];
+  const g = cfg.gravity * 1600 * DPR();
+  const w = canvas.width, h = canvas.height;
+  for (const b of balls) {
+    if (b.kicked) {
+      b.x += b.kickedVx * dt;
+      b.y += b.kickedVy * dt;
+      b.spin += dt * 25;
+      continue;
+    }
+    b.vy += g * dt;
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+    b.spin += dt * 8 * Math.sign(b.vx || 1);
+  }
+  // 画面外に出たボールを除去(未キックはミス扱い→コンボ切れ)
+  balls = balls.filter((b) => {
+    const out = b.x < -140 || b.x > w + 140 || b.y > h + 140 || b.y < -240;
+    if (out && b.active && !b.kicked && phase === "playing") {
+      combo = 0;
+      updateComboBanner();
+    }
+    return !out;
+  });
+  // 当たり判定
+  if (phase !== "playing") return;
+  const hitFeet = [feet.left, feet.right].filter(Boolean);
+  if (hitFeet.length === 0) return;
+  for (const b of balls) {
+    if (!b.active || b.kicked) continue;
+    for (const f of hitFeet) {
+      const dist = Math.hypot(f.x - b.x, f.y - b.y);
+      if (dist <= cfg.hitRadius * DPR() + b.radius) {
+        onKick(b, f, nowMs);
+        break;
+      }
+    }
+  }
+}
+function onKick(ball, foot, nowMs) {
+  const cfg = DIFFICULTY[difficulty];
+  const perfect = (foot.speed || 0) >= PERFECT_FOOT_SPEED * DPR();
+  const base = BALL_TYPE[ball.type].points;
+  const comboBonus = combo * 5;
+  const pts = Math.round(base * cfg.multiplier * (perfect ? 1.5 : 1) + comboBonus);
+  score += pts;
+  hits++;
+  combo++;
+  maxCombo = Math.max(maxCombo, combo);
+  if (perfect) perfectCount++;
+  lastHitAt = nowMs;
+
+  ball.kicked = true;
+  ball.active = false;
+  // ボールをゴール方向(画面上方)へ吹き飛ばす
+  const dir = ball.x < canvas.width / 2 ? 1 : -1;
+  ball.kickedVx = dir * (500 + Math.random() * 400) * DPR();
+  ball.kickedVy = -(1400 + Math.random() * 500) * DPR();
+
+  spawnBurst(ball.x, ball.y, BALL_TYPE[ball.type].color, perfect ? 26 : 16);
+  popups.push({
+    x: ball.x, y: ball.y - 20,
+    text: `+${pts}`,
+    sub: perfect ? "PERFECT!" : (ball.type === "GOLD" ? "GOLD!" : ""),
+    born: nowMs, life: 900,
+    color: perfect ? "#FFC53D" : "#F5F8FF",
+  });
+  playKickSound(perfect);
+  vibrate(perfect ? [40, 30, 60] : 35);
+  if (combo > 1 && combo % 5 === 0) playComboSound(combo);
+
+  scoreVal.textContent = String(score);
+  hitsVal.textContent = String(hits);
+  updateComboBanner();
+}
+function updateComboBanner() {
+  if (combo >= 2) {
+    comboNum.textContent = String(combo);
+    comboBanner.classList.add("show");
+    const scale = Math.min(1.5, 1 + combo * 0.03);
+    comboNum.style.transform = `scale(${scale})`;
+  } else {
+    comboBanner.classList.remove("show");
+  }
+}
+
+/* ---------------- エフェクト ---------------- */
+function spawnBurst(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    const ang = Math.random() * Math.PI * 2;
+    const spd = (250 + Math.random() * 550) * DPR();
+    particles.push({
+      x, y,
+      vx: Math.cos(ang) * spd,
+      vy: Math.sin(ang) * spd - 200,
+      life: 0.55 + Math.random() * 0.4,
+      age: 0,
+      size: (3 + Math.random() * 5) * DPR(),
+      color,
+    });
+  }
+}
+function updateParticles(dt) {
+  for (const p of particles) {
+    p.age += dt;
+    p.vy += 1500 * DPR() * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+  }
+  particles = particles.filter((p) => p.age < p.life);
+}
+
+/* ---------------- 描画 ---------------- */
+function drawBall(b) {
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.rotate(b.spin);
+  const t = BALL_TYPE[b.type];
+  // グロー
+  ctx.shadowColor = t.glow;
+  ctx.shadowBlur = 24;
+  // 本体
+  const grad = ctx.createRadialGradient(-b.radius * 0.35, -b.radius * 0.35, b.radius * 0.1, 0, 0, b.radius);
+  grad.addColorStop(0, "#FFFFFF");
+  grad.addColorStop(0.55, t.color);
+  grad.addColorStop(1, b.type === "NORMAL" ? "#B9C4D8" : t.color);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(0, 0, b.radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  // サッカーボール風の五角形パッチ
+  ctx.fillStyle = b.type === "GOLD" ? "rgba(120,80,0,0.8)" : "rgba(11,16,38,0.85)";
+  const pent = (cx, cy, r) => {
+    ctx.beginPath();
+    for (let i = 0; i < 5; i++) {
+      const a = -Math.PI / 2 + (i * 2 * Math.PI) / 5;
+      const px = cx + Math.cos(a) * r, py = cy + Math.sin(a) * r;
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.closePath(); ctx.fill();
+  };
+  pent(0, 0, b.radius * 0.34);
+  for (let i = 0; i < 5; i++) {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / 5;
+    pent(Math.cos(a) * b.radius * 0.78, Math.sin(a) * b.radius * 0.78, b.radius * 0.2);
+  }
+  ctx.restore();
+}
+function drawFoot(f, nowMs) {
+  if (!f) return;
+  const cfg = DIFFICULTY[difficulty];
+  const fast = (f.speed || 0) >= PERFECT_FOOT_SPEED * DPR();
+  const d = DPR();
+  // 判定サークル
+  ctx.save();
+  ctx.strokeStyle = fast ? "rgba(255,197,61,0.9)" : "rgba(35,224,255,0.75)";
+  ctx.lineWidth = 3 * d;
+  ctx.setLineDash([8 * d, 8 * d]);
+  ctx.lineDashOffset = -((nowMs / 40) % 16) * d;
+  ctx.beginPath();
+  ctx.arc(f.x, f.y, cfg.hitRadius * d, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // 中心マーカー
+  ctx.shadowColor = fast ? "rgba(255,197,61,1)" : "rgba(35,224,255,1)";
+  ctx.shadowBlur = 16 * d;
+  ctx.fillStyle = fast ? "#FFC53D" : "#23E0FF";
+  ctx.beginPath();
+  ctx.arc(f.x, f.y, 9 * d, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+function drawPopups(nowMs) {
+  for (const p of popups) {
+    const t = (nowMs - p.born) / p.life;
+    if (t >= 1) continue;
+    const alpha = 1 - t;
+    const d = DPR();
+    const y = p.y - t * 90 * d;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.textAlign = "center";
+    ctx.font = `700 ${30 * d}px Bungee, sans-serif`;
+    ctx.fillStyle = p.color;
+    ctx.shadowColor = "rgba(0,0,0,0.6)";
+    ctx.shadowBlur = 6 * d;
+    ctx.fillText(p.text, p.x, y);
+    if (p.sub) {
+      ctx.font = `700 ${16 * d}px Bungee, sans-serif`;
+      ctx.fillStyle = "#FFC53D";
+      ctx.fillText(p.sub, p.x, y - 32 * d);
+    }
+    ctx.restore();
+  }
+  popups = popups.filter((p) => nowMs - p.born < p.life);
+}
+function drawParticles() {
+  for (const p of particles) {
+    const alpha = 1 - p.age / p.life;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = p.color;
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* ---------------- ポジショニング判定 ---------------- */
+function handlePositioning(nowMs) {
+  const bothFeet = feet.left && feet.right;
+  const poseAlive = nowMs - poseSeenAt < 600;
+  if (bothFeet && poseAlive) {
+    if (!positioningStableSince) positioningStableSince = nowMs;
+    const held = nowMs - positioningStableSince;
+    positioningPill.textContent = "OK! そのまま動かないで…";
+    positioningPill.classList.add("ok");
+    if (held >= 1200) {
+      startCountdown();
+    }
+  } else {
+    positioningStableSince = 0;
+    positioningPill.classList.remove("ok");
+    positioningPill.textContent = poseAlive
+      ? "足元までカメラに映るように下がってください"
+      : "全身がカメラに映る位置に立ってください";
+  }
+}
+function startCountdown() {
+  phase = "countdown";
+  hide(positioningMsg);
+  show(countdownEl);
+  let n = 3;
+  countdownNum.textContent = String(n);
+  playBeep(880);
+  vibrate(20);
+  const iv = setInterval(() => {
+    n--;
+    if (n <= 0) {
+      clearInterval(iv);
+      hide(countdownEl);
+      beginPlay();
+    } else {
+      countdownNum.textContent = String(n);
+      playBeep(880);
+      vibrate(20);
+    }
+  }, 1000);
+}
+
+/* ---------------- ゲームフロー ---------------- */
+function beginPlay() {
+  phase = "playing";
+  playBeep(1320, 0.3, 0.25);
+  const cfg = DIFFICULTY[difficulty];
+  score = 0; hits = 0; totalBalls = 0; combo = 0; maxCombo = 0; perfectCount = 0;
+  balls = []; particles = []; popups = [];
+  timeRemaining = cfg.timeLimit;
+  lastSpawn = performance.now() - cfg.spawnInterval + 600; // 最初のボールは0.6秒後
+  scoreVal.textContent = "0";
+  hitsVal.textContent = "0";
+  timeVal.textContent = String(timeRemaining);
+  hudTime.classList.remove("warn");
+  show(hud);
+  timerHandle = setInterval(() => {
+    timeRemaining--;
+    timeVal.textContent = String(Math.max(0, timeRemaining));
+    if (timeRemaining <= 10) {
+      hudTime.classList.add("warn");
+      if (timeRemaining > 0) playBeep(660, 0.08, 0.12);
+    }
+    if (timeRemaining <= 0) endGame();
+  }, 1000);
+}
+function endGame() {
+  if (timerHandle) { clearInterval(timerHandle); timerHandle = null; }
+  phase = "result";
+  playWhistle();
+  vibrate([80, 60, 80]);
+  hide(hud);
+  comboBanner.classList.remove("show");
+  hide(flipBtn); hide(quitBtn);
+
+  const rate = totalBalls > 0 ? Math.round((hits / totalBalls) * 100) : 0;
+  const rank = rate >= 85 && perfectCount >= hits * 0.4 ? "S" : rate >= 70 ? "A" : rate >= 45 ? "B" : "C";
+  $("rank-badge").textContent = rank;
+  $("result-score").textContent = String(score);
+  $("r-hits").textContent = `${hits}/${totalBalls}`;
+  $("r-rate").textContent = `${rate}%`;
+  $("r-combo").textContent = String(maxCombo);
+  $("r-perfect").textContent = String(perfectCount);
+  const prev = getHighScore(difficulty);
+  if (score > prev) {
+    setHighScore(difficulty, score);
+    show($("newrecord"));
+  } else {
+    hide($("newrecord"));
+  }
+  setScreen("result");
+}
+function backToHome() {
+  if (timerHandle) { clearInterval(timerHandle); timerHandle = null; }
+  phase = "start";
+  balls = []; particles = []; popups = [];
+  hide(hud); hide(positioningMsg); hide(countdownEl);
+  hide(flipBtn); hide(quitBtn);
+  comboBanner.classList.remove("show");
+  stopCamera();
+  refreshHighScoreLine();
+  setScreen("start");
+}
+async function startGameFlow() {
+  initAudio();
+  errorBox.classList.add("hidden");
+  setScreen("loading");
+  phase = "loading";
+  try {
+    $("loading-text").textContent = "カメラを起動しています…";
+    await startCamera();
+    $("loading-text").textContent = "AIモデルを読み込んでいます…";
+    await loadModel();
+  } catch (err) {
+    console.error(err);
+    setScreen("start");
+    phase = "start";
+    errorBox.classList.remove("hidden");
+    const isPerm = err && (err.name === "NotAllowedError" || err.name === "SecurityError");
+    errorBox.textContent = isPerm
+      ? "カメラへのアクセスが許可されませんでした。ブラウザの設定でこのサイトのカメラを許可して、もう一度お試しください。(HTTPSまたはlocalhostでのアクセスが必要です)"
+      : `起動に失敗しました: ${err && err.message ? err.message : err}。通信環境を確認して再度お試しください。`;
+    return;
+  }
+  // ポジショニングへ
+  hide(screens.loading);
+  phase = "positioning";
+  positioningStableSince = 0;
+  show(positioningMsg);
+  show(flipBtn); show(quitBtn);
+}
+
+/* ---------------- メインループ ---------------- */
+function resizeCanvas() {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = Math.round(window.innerWidth * dpr);
+  canvas.height = Math.round(window.innerHeight * dpr);
+  canvas.style.width = window.innerWidth + "px";
+  canvas.style.height = window.innerHeight + "px";
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+window.addEventListener("resize", resizeCanvas);
+resizeCanvas();
+
+// 内部座標は canvas ピクセル基準。CSSピクセルとの差を吸収するため
+// 描画・判定はすべて canvas.width/height 系で統一している。
+
+function loop(nowMs) {
+  rafHandle = requestAnimationFrame(loop);
+  const dt = Math.min(0.05, (nowMs - (lastFrameTs || nowMs)) / 1000);
+  lastFrameTs = nowMs;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const active = phase === "positioning" || phase === "countdown" || phase === "playing";
+  if (!active) return;
+
+  updatePose(nowMs);
+
+  if (phase === "positioning") {
+    handlePositioning(nowMs);
+  }
+  if (phase === "playing") {
+    spawnBall(nowMs);
+    if (combo > 0 && nowMs - lastHitAt > COMBO_TIMEOUT) {
+      combo = 0;
+      updateComboBanner();
+    }
+  }
+  if (phase === "playing" || phase === "result") {
+    updateBalls(dt, nowMs);
+  }
+  updateParticles(dt);
+
+  // 描画
+  for (const b of balls) drawBall(b);
+  drawFoot(feet.left, nowMs);
+  drawFoot(feet.right, nowMs);
+  drawParticles();
+  drawPopups(nowMs);
+}
+rafHandle = requestAnimationFrame(loop);
+
+/* ---------------- UIイベント ---------------- */
+function refreshHighScoreLine() {
+  $("highscore-line").textContent = `ハイスコア (${
+    difficulty === "EASY" ? "イージー" : difficulty === "NORMAL" ? "ノーマル" : "ハード"
+  }): ${getHighScore(difficulty)}`;
+}
+document.querySelectorAll(".diff-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".diff-btn").forEach((b) => b.classList.remove("selected"));
+    btn.classList.add("selected");
+    difficulty = btn.dataset.diff;
+    refreshHighScoreLine();
+    initAudio();
+    playBeep(740, 0.08, 0.1);
+  });
+});
+$("start-btn").addEventListener("click", startGameFlow);
+$("replay-btn").addEventListener("click", async () => {
+  initAudio();
+  setScreen("loading");
+  hide(screens.result);
+  // カメラとモデルは維持したままポジショニングへ
+  hide(screens.loading);
+  phase = "positioning";
+  positioningStableSince = 0;
+  balls = []; particles = []; popups = [];
+  show(positioningMsg);
+  show(flipBtn); show(quitBtn);
+});
+$("home-btn").addEventListener("click", backToHome);
+quitBtn.addEventListener("click", backToHome);
+flipBtn.addEventListener("click", async () => {
+  facingMode = facingMode === "environment" ? "user" : "environment";
+  try {
+    $("loading-text").textContent = "カメラを切り替えています…";
+    await startCamera();
+  } catch (e) {
+    console.error(e);
+  }
+});
+
+// 画面がバックグラウンドになったら一時停止扱い(タイマーだけ止める)
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && phase === "playing") {
+    endGame();
+  }
+});
+
+refreshHighScoreLine();
+</script>
+</body>
+</html>
